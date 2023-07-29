@@ -1,0 +1,25 @@
+{
+  "name": "wccp",
+  "version": "0.1.0",
+  "description": "WASA Common Command&Telemetry Protocol",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wasa-rockoon/WCCP.git"
+  },
+  "author": "Yuki Fujihara",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/wasa-rockoon/WCCP/issues"
+  },
+  "homepage": "https://github.com/wasa-rockoon/WCCP#readme",
+  "dependencies": {
+    "typescript": "^5.1.6"
+  }
+}
