@@ -1,187 +1,282 @@
 #include "Packet.hpp"
 
-void Entry::set(uint8_t type) {
-	this->type = type, payload.uint = 0;
-}
+#include <algorithm>
+#include <cstring>
 
-void Entry::set(uint8_t type, const uint8_t* bytes) {
-	this->type = type;
-	for (int i = 0; i < 4; i++) payload.bytes[i] = bytes[i];
-}
-void Entry::set(uint8_t type, uint8_t byte0, uint8_t byte1, uint8_t byte2, uint8_t byte3) {
-	this->type = type;
-	payload.bytes[0] = byte0;
-	payload.bytes[1] = byte1;
-	payload.bytes[2] = byte2;
-	payload.bytes[3] = byte3;
-}
+float16::float16(float value) {
+  uint32_t value32 = *reinterpret_cast<uint32_t *>(&value);
+  uint16_t value16;
+  unsigned sign = value32 >> 31;
+  unsigned exp = (value32 >> 23) & 0xFF;
+  unsigned frac = value32 & 0x007FFFFF;
 
-void Entry::set(uint8_t type, int32_t value) {
-	this->type = type;
-	payload.int_ = value;
-}
-
-void Entry::set(uint8_t type, uint32_t value) {
-	this->type = type;
-	payload.uint = value;
-}
-
-void Entry::set(uint8_t type, float value) {
-	this->type = type;
-	payload.float_ = value;
-}
-
-uint8_t Entry::encode(uint8_t* buf) const {
-  uint8_t len = 0;
-  uint8_t type_ = (type - 64) & 0b00111111;
-
-  if (payload.uint & 0xFFFF0000) {
-    len = 4;
-    type_ |= 0b11000000;
+  if (exp == 0) {
+    if (frac == 0)
+      value16 = sign << 15; // +- Zero
+    else
+      value16 = (sign << 15) | (frac >> 13); // Denormalized values
+  } else if (exp == 0xFF) {
+    if (frac == 0)
+      value16 = (sign << 15) | 0x7C0; // +- Infinity
+    else
+      value16 = (sign << 15) | (0x1F << 20) | (frac >> 13); // (S/Q)NaN
   }
-  else if (payload.uint & 0x0000FF00) {
-    len = 2;
-    type_ |= 0b10000000;
+  // Normalized values
+  else {
+    value16 = (sign << 15) |
+              (std::max(std::min((int)exp - 127 + 15, 0), 31) << 23) |
+              (frac << 13);
   }
-  else if (payload.uint & 0x000000FF) {
-    len = 1;
-    type_ |= 0b01000000;
-  }
-
-  buf[0] = type_;
-
-  for (int i = 0; i < len; i++) buf[1 + i] = payload.bytes[i];
-
-  return 1 + len;
+  raw_ = value16;
 }
 
-uint8_t Entry::decode(const uint8_t* buf) {
-	type = (buf[0] & 0b00111111) + 64;
-
-  uint8_t len;
-  switch (buf[0] & 0b11000000) {
-  case 0b01000000:
-    len = 1;
-    break;
-  case 0b10000000:
-    len = 2;
-    break;
-  case 0b11000000:
-    len = 4;
-    break;
-  default:
-    len = 0;
+float float16::toFloat() const {
+  uint16_t value16 = raw_;
+  uint32_t value32;
+  unsigned sign = value16 >> 15;
+  unsigned exp = (value16 >> 10) & 0x1F;
+  unsigned frac = value16 & 0x03FF;
+  if (exp == 0) {
+    if (frac == 0)
+      value32 = sign << 31; // +- Zero
+    else
+      value32 = (sign << 31) | (frac << 13); // Denormalized values
+  } else if (exp == 0x1F) {
+    if (frac == 0)
+      value32 = (sign << 31) | 0x7F800000; // +- Infinity
+    else
+      value32 = (sign << 31) | (0xFF << 23) | (frac << 13); // (S/Q)NaN
   }
-  payload.uint = 0;
+  // Normalized values
+  else
+    value32 = (sign << 31) | ((exp - 15 + 127) << 23) | (frac << 13);
 
-  for (int i = 0; i < len; i++) payload.bytes[i] = buf[1 + i];
-  return 1 + len;
+  return *reinterpret_cast<float *>(&value32);
+}
+
+Entry::Entry(const Entry &entry)
+    : packet_(entry.packet_), ptr_(entry.ptr_), count_(entry.count_) {};
+
+Entry::Entry(Packet* packet, unsigned ptr, uint8_t count)
+    : packet_(packet), ptr_(ptr), count_(count){};
+
+
+uint8_t Entry::type() const {
+  return (packet_->buf[ptr_] & 0b00111111) + 64;
+};
+uint8_t Entry::size() const {
+  uint8_t sizes[] = {0, 1, 2, 4};
+  return sizes[packet_->buf[ptr_] >> 6];
+};
+
+float Entry::float16() const {
+  uint16_t value16 = uint16();
+  uint32_t value32;
+  unsigned sign = value16 >> 15;
+  unsigned exp  = (value16 >> 10) & 0x1F;
+  unsigned frac = value16 & 0x03FF;
+  if (exp == 0) {
+    if (frac == 0) value32 = sign << 31; // +- Zero
+    else value32 = (sign << 31) | (frac << 13); // Denormalized values
+  }
+  else if (exp == 0x1F) {
+    if (frac == 0) value32 = (sign << 31) | 0x7F800000; // +- Infinity
+    else value32 = (sign << 31) | (0xFF << 23) | (frac << 13); // (S/Q)NaN
+  }
+  // Normalized values
+  else value32 = (sign << 31) | ((exp - 15 + 127) << 23) | (frac << 13);
+
+  return *reinterpret_cast<float*>(&value32);
+}
+
+Entry& Entry::append(uint8_t type, const uint8_t *bytes, unsigned size) {
+  if (ptr_ + 1 + size > packet_->buf_size)
+    return *this;
+
+  unsigned actual_size = size;
+  switch (size) {
+  case 4:
+    if (bytes[2] == 0x00 && bytes[2] == 0x00)
+      actual_size = 2;
+    else {
+      packet_->buf[ptr_ + 4] = bytes[3];
+      packet_->buf[ptr_ + 3] = bytes[2];
+    }
+  case 2:
+    if (bytes[1] == 0x00 && actual_size == 2)
+      actual_size = 1;
+    else
+      packet_->buf[ptr_ + 2] = bytes[1];
+  case 1:
+    if (bytes[0] == 0x00 && actual_size == 1)
+      actual_size = 0;
+    else
+      packet_->buf[ptr_ + 1] = bytes[0];
+  }
+  uint8_t sizes[] = {0b00, 0b01, 0b10, 0b00, 0b11};
+  packet_->buf[ptr_] = ((type - 64) & 0b00111111) | (sizes[actual_size] << 6);
+  ptr_ += 1 + this->size();
+  count_++;
+  packet_->len += 1 + actual_size;
+  packet_->setEnd(*this);
+  packet_->setSize(packet_->size() + 1);
+  return *this;
+}
+
+Entry& Entry::appendFloat16(uint8_t type, float value) {
+  uint32_t value32 = *reinterpret_cast<uint32_t*>(&value);
+  uint16_t value16;
+  unsigned sign = value32 >> 31;
+  unsigned exp = (value32 >> 23) & 0xFF;
+  unsigned frac = value32 & 0x007FFFFF;
+
+  if (exp == 0) {
+    if (frac == 0) value16 = sign << 15; // +- Zero
+    else value16 = (sign << 15) | (frac >> 13); // Denormalized values
+  } else if (exp == 0xFF) {
+    if (frac == 0) value16 = (sign << 15) | 0x7C0; // +- Infinity
+    else value16 = (sign << 15) | (0x1F << 20) | (frac >> 13); // (S/Q)NaN
+  }
+  // Normalized values
+  else {
+    value16 = (sign << 15) | (std::max(std::min((int)exp - 127 + 15, 0), 31) << 23) |
+              (frac << 13);
+  }
+
+  return append(type, value16, 2);
+}
+
+Entry Entry::next() const {
+  if (ptr_ + 1 + size() <= packet_->len) {
+    return Entry(packet_, ptr_ + 1 + size(), count_ + 1);
+  }
+  else return *this;
+}
+uint8_t* Entry::operator*() { return packet_->buf + ptr_ + 1; }
+Entry& Entry::operator++() {
+  if (ptr_ + 1 + size() < packet_->len) {
+    ptr_ += 1 + (unsigned)size();
+  }
+  else *this = packet_->end_;
+  return *this;
+}
+Entry Entry::operator++(int) {
+  Entry result = *this;
+  ++(*this);
+  return result;
+}
+
+
+Entry& Entry::operator=(const Entry &another) {
+  packet_ = another.packet_;
+  ptr_    = another.ptr_;
+  count_  = another.count_;
+  return *this;
 }
 
 void Entry::print() const {
 #ifdef ARDUINO
-  Serial.printf("%c: %ld %f", type, payload.int_, payload.float_);
+  Serial.printf("%c: %d %f", type(), int32(), float32());
+#else
+  printf("%c: %d", type(), int32());
 #endif
 }
 
-Entry& Entry::operator=(const Entry& entry) {
-	type = entry.type;
-	payload.uint = entry.payload.uint;
-	return *this;
+const uint8_t *Entry::decode(uint8_t *bytes) const {
+  bytes[0] = bytes[1] = bytes[2] = bytes[3] = 0;
+  switch (size()) {
+  case 4:
+    bytes[3] = packet_->buf[ptr_ + 4];
+    bytes[2] = packet_->buf[ptr_ + 3];
+  case 2:
+    bytes[1] = packet_->buf[ptr_ + 2];
+  case 1:
+    bytes[0] = packet_->buf[ptr_ + 1];
+  }
+  return bytes;
 }
 
+Packet::Packet() : buf(nullptr), buf_size(0), len(4), end_(this, 4, 0){};
 
-Packet::Packet(): id(0), from(0), size(0) {};
-Packet::Packet(Kind kind, uint8_t id, uint8_t from, uint8_t dest, uint8_t size)
-  : kind(kind), id(id), from(from), dest(dest), size(size){};
+Packet::Packet(const Packet& packet)
+  : buf(packet.buf), buf_size(packet.buf_size), len(packet.len),
+    end_(packet.end_) {}
 
-float Packet::get(uint8_t type, uint8_t index, float default_) const {
-	Payload p = { .float_ = default_ };
-	get(type, index, p);
-	return p.float_;
-}
+Packet::Packet(uint8_t *buf, unsigned buf_size)
+  : buf(buf), buf_size(buf_size), len(4), end_(this, 4, 0) {};
+Packet::Packet(uint8_t *buf, unsigned buf_size, unsigned len)
+    : buf(buf), buf_size(buf_size), len(len),
+      end_(this, len, buf[2] & 0b11111) {};
 
-bool Packet::get(uint8_t type, uint8_t index) const {
-	Payload p;
-	return get(type, index, p);
-}
-
-bool Packet::get(uint8_t type, uint8_t index, union Payload& p) const {
-	for (int n = 0; n < size; n++) {
-		if (entries[n].type == type) {
-			if (index == 0) {
-				p = entries[n].payload;
-				return true;
-			}
-			else index--;
-		}
-	}
-	return false;
-}
-
-void Packet::addTimestamp(uint32_t time) {
-	entries[size].set('t', time);
-	size++;
-}
-
-unsigned Packet::encode(uint8_t * buf, uint8_t node, uint8_t seq) const {
+void Packet::set(Kind kind, uint8_t id, uint8_t from, uint8_t dest) {
   buf[0] = ((kind & 0b1) << 7) | (id & 0b1111111);
-  buf[1] = ((from & 0b111) << 5) | (node & 0b11111);
-  buf[2] = ((dest & 0b111) << 5) | (size & 0b11111);
+  buf[1] = ((from & 0b111) << 5) | (buf[1] & 0b11111);
+  buf[2] = ((dest & 0b111) << 5) | (buf[2] & 0b11111);
+}
+void Packet::set_(uint8_t node, uint8_t seq) {
+  buf[1] = (buf[1] & 0b11100000) | (node & 0b11111);
   buf[3] = seq;
-
-  unsigned i = 4;
-  for (uint8_t n = 0; n < size; n++) {
-    i += entries[n].encode(buf + i);
-  }
-
-  return i;
 }
 
-bool Packet::decode(const uint8_t *buf, uint8_t len, uint8_t size_max) {
-    kind = buf[0] >> 7;
-    id = buf[0] & 0b1111111;
-    from = buf[1] >> 5;
-    node = buf[1] & 0b11111;
-    dest = buf[2] >> 5;
-    size = buf[2] & 0b11111;
-    seq = buf[3];
+void Packet::setSize(uint8_t n) {
+  buf[2] = (buf[2] & 0b11100000) | (n & 0b11111);
+}
 
-    unsigned i = 4;
+void Packet::clear() {
+  len = 4;
+  setSize(0);
+  end_ = begin();
+};
 
-    for (uint8_t n = 0; n < size; n++) {
-      if (i > len || n > size_max) {
-        return false;
-      }
-      Entry entry;
-      i += entry.decode(buf + i);
-      entries[n] = entry;
+Entry Packet::find(uint8_t type, uint8_t index) {
+  uint8_t i = 0;
+  for (Entry entry = begin(); entry != end(); ++entry) {
+    if (entry.type() == type) {
+      if (i == index) return entry;
+      i++;
     }
-    return true;
   }
+  return end();
+}
 
-  void Packet::print() const {
+
+Packet& Packet::operator=(const Packet &another) {
+  buf = another.buf;
+  len = another.len;
+  buf_size = another.buf_size;
+  end_ = another.end_;
+  return *this;
+}
+
+bool Packet::copyTo(Packet& another) const {
+  if (len > another.buf_size) return false;
+  another.len = len;
+  memcpy(another.buf, buf, len);
+ another.end_ = Entry(&another, end_.ptr_, end_.count_);
+  return true;
+}
+
+void Packet::print() {
 #ifdef ARDUINO
-    Serial.printf("%c (%c) [%d]\n", id, from, size);
-    for (int n = 0; n < size; n++) {
-      Serial.print("  ");
-      entries[n].print();
-      Serial.println();
-    }
-  #endif
+  Serial.printf("%c(%x) (%d %d -> %d) [%d] #%d\n",
+                id(), id(), from(), node(), dest(), size(), seq());
+  for (Entry entry = begin(); entry != end(); ++entry) {
+    Serial.printf("  ");
+    entry.print();
+    Serial.printf("\n");
+  }
+#else
+  printf("%c(%x) (%d %d -> %d) [%d] #%d\n",
+         id(), id(), from(), node(), dest(), size(), seq());
+  for (Entry entry = begin(); entry != end(); ++entry) {
+    printf("  ");
+    entry.print();
+    printf("\n");
+  }
+#endif
 }
 
-Packet& Packet::operator=(const Packet& packet) {
-  kind = packet.kind;
-	id   = packet.id;
-	from = packet.from;
-  node = packet.node;
-  dest = packet.dest;
-	size = packet.size;
-  seq  = packet.seq;
-
-	for (int n = 0; n < size; n++) {
-		entries[n] = packet.entries[n];
-	}
-	return *this;
+void Packet::setEnd(Entry &entry) {
+  end_ = entry;
+  setSize(entry.count_);
 }

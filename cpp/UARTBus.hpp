@@ -6,6 +6,7 @@
 #include <Arduino.h>
 
 #include "Bus.hpp"
+#include "Packet.hpp"
 
 
 #define BUS_SERIAL_BAUD 115200
@@ -34,7 +35,7 @@
 #if defined (ARDUINO_ARCH_RP2040)
 
 #elif defined(ESP32)
-typedef QueueHandle_t queue_t
+typedef QueueHandle_t queue_t;
 #else
 typedef int queue_t;
 #endif
@@ -49,14 +50,12 @@ public:
 
   void update();
 
-  bool send(const Packet &packet);
+  bool send(Packet &packet) override;
+  const Packet receive() override;
 
   bool availableForSend(const Packet &packet);
 
   void printNodeInfo();
-
-protected:
-  virtual bool receiveN(Packet &packet, uint8_t N);
 
 private:
   Stream &upper_serial_;
@@ -70,6 +69,8 @@ private:
 
   queue_t send_queue_;
   queue_t receive_queue_;
+
+  uint8_t receive_buf_[PACKET_LEN_MAX];
 
 
   void checkSend();

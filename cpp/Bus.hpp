@@ -40,13 +40,17 @@ private:
 // N must be 2^n
 template<unsigned N> class BitFilter {
 public:
-  BitFilter() {};
+  BitFilter() {
+    for (unsigned i = 0; i < N / 8; i++) field_[i] = 0x00;
+  };
 
   inline void set(unsigned key) {
-    field_[key % N >> 3] |= 0b1 << (key & 0b111);
+    field_[(key % N) >> 3] |= 0b1 << (key & 0b111);
   }
-  inline void setAll() {
-    for (unsigned i = 0; i < N / 8; i++) field_[i] = 0xFF;
+  void setAll() {
+    for (unsigned i = 0; i < N / 8; i++) {
+      field_[i] = 0xFF;
+    }
   }
   inline void clearAll() {
     for (unsigned i = 0; i < N / 8; i++) field_[i] = 0x0;
@@ -60,8 +64,8 @@ public:
     return field_;
   }
 
-private:
-  uint8_t field_[(N+7)/8];
+//private:
+  uint8_t field_[N/8];
 };
 
 struct NodeInfo {
@@ -87,24 +91,22 @@ public:
 
   virtual bool begin();
 
-  inline void listenAll() { filter_.setAll(); filterChanged(); }
-  inline void unlistenAll() { filter_.clearAll(); filterChanged(); }
-  inline void listen(Packet::Kind kind, uint8_t id) {
+  virtual void listenAll() {
+    filter_.setAll();
+  }
+  virtual void unlistenAll() { filter_.clearAll();}
+  virtual void listen(Packet::Kind kind, uint8_t id) {
     filter_.set((kind << 7) | id);
-    filterChanged();
   }
   inline bool filter(uint8_t id) const {return filter_.isSet(id); }
 
   virtual void update();
 
-  virtual bool send(const Packet &packet) = 0;
+  virtual bool send(Packet &packet) = 0;
 
-  template <uint8_t N> bool receive(PacketN<N> &packet) {
-    return receiveN(packet, N);
-  }
+  const Packet receive();
 
   virtual bool availableForSend(const Packet &packet) = 0;
-
 
   inline void error() { error_count_++; };
   inline void dropped(){ dropped_count_++; };
@@ -114,7 +116,7 @@ public:
   void sendAnomaly(uint8_t category, const char *info, bool send_bus = true);
   void sendHeartbeat();
 
-  void sendTestPacket();
+  // void sendTestPacket();
 
   void receivedHeartbeat(Packet &packet);
 
@@ -127,13 +129,16 @@ protected:
   NodeInfo nodes[NODE_MAX];
 
   unsigned error_count_;
+  uint8_t  error_code_[4];
   unsigned dropped_count_;
+
+  uint32_t sanity_;
 
   BitFilter<BUS_FILTER_WIDTH> filter_;
 
-  virtual bool receiveN(Packet &packet, uint8_t N) = 0;
 
-  virtual void filterChanged() {};
+  virtual unsigned receive(uint8_t*& buf) = 0;
+
 
 private:
 

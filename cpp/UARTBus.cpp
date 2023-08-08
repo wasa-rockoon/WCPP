@@ -9,17 +9,7 @@
 
 FastCRC8 CRC8;
 
-void printlnBytes(const uint8_t *bytes, unsigned len, unsigned split = 0) {
-  Serial.print("0x");
-  for (unsigned n = 0; n < len; n++) {
-    if (split > 0 && n % split == 0)
-      Serial.print('_');
-    if (bytes[n] < 16)
-      Serial.print("0");
-    Serial.print(bytes[n], HEX);
-  }
-  Serial.println();
-}
+
 
 UARTBus::UARTBus(Stream &upper_serial, Stream &lower_serial, uint8_t system,
                  uint8_t node_name)
@@ -32,9 +22,10 @@ bool UARTBus::begin() {
 #if defined(ARDUINO_ARCH_RP2040)
   queue_init(&send_queue_, 8, SEND_QUEUE_SIZE / 8);
   queue_init(&receive_queue_, 8, RECEIVE_QUEUE_SIZE / 8);
+#elif defined(ESP32)
+  send_queue_ = xQueueCreate(SEND_QUEUE_SIZE / 8, 8);
+  receive_queue_ = xQueueCreate(RECEIVE_QUEUE_SIZE / 8, 8);
 #endif
-
-  filterChanged();
 
   // Serial.printf("Bus initialized %d %d\n", self_id_, self_unique_);
 
@@ -52,17 +43,16 @@ void UARTBus::update() {
 }
 
 inline bool UARTBus::availableForSend(const Packet &packet) {
-  return 1 + 4 + (unsigned)packet.size * 5
+  return 1 + 4 + (unsigned)packet.size() * 5
     < SEND_QUEUE_SIZE - queueSize(send_queue_);
 }
 
 
-bool UARTBus::send(const Packet &packet) {
-  uint8_t buf[PACKET_LEN_MAX];
-  unsigned len = packet.encode(buf, self_node_, self_seq_);
+bool UARTBus::send(Packet &packet) {
+  packet.set_(self_node_, self_seq_);
   self_seq_++;
 
-  if (!queuePush(send_queue_, buf, len)) {
+  if (!queuePush(send_queue_, packet.buf, packet.len)) {
     dropped();
     sendAnomaly('B', "SDRP", false);
     return false;
@@ -70,18 +60,10 @@ bool UARTBus::send(const Packet &packet) {
   return true;
 }
 
-bool UARTBus::receiveN(Packet &packet, uint8_t N) {
-  uint8_t buf[PACKET_LEN_MAX];
-  unsigned len = queuePop(receive_queue_, buf);
+const Packet UARTBus::receive() {
+  unsigned len = queuePop(receive_queue_, receive_buf_);
 
-  if (len == 0) return false;
-
-  if (!packet.decode(buf, len, N)) {
-    error();
-    sendAnomaly('B', "DECD");
-    return false;
-  }
-  return true;
+  return Packet(receive_buf_, len);
 }
 
 void UARTBus::checkSend() {
@@ -152,15 +134,9 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
       bool received_first = nodes[node_id].received(seq);
 
       if ((decoded[0] & 0b01111111) == ID_HEARTBEAT) {
-        PacketN<1> heartbeat;
-        if (!heartbeat.decode(decoded, len - 1, 1)) {
-          error();
-          sendAnomaly('B', "DECD");
-        }
-        else {
-          receivedHeartbeat(heartbeat);
-          sendViaDebugSerial(buf, count);
-        }
+        Packet heartbeat(decoded, len - 1);
+        receivedHeartbeat(heartbeat);
+        sendViaDebugSerial(buf, count);
       }
       else if (received_first) {
         another_serial.write(buf, count);
@@ -183,17 +159,17 @@ bool UARTBus::queuePush(queue_t &queue, const uint8_t *data, unsigned len) {
   unsigned size = queueSize(queue);
 
   if (size + 1 + len >= SEND_QUEUE_SIZE) {
-    uint8_t buf[8];
+    // uint8_t buf[8];
 
-#if defined(ARDUINO_ARCH_RP2040)
-    queue_peek_blocking(&queue, buf);
-#endif
+// #if defined(ARDUINO_ARCH_RP2040)
+//     queue_peek_blocking(&queue, buf);
+// #endif
 
-    unsigned priority_new = data[0];
-    unsigned priority_top = buf[1];
-    if (priority_new > priority_top) {
+//     unsigned priority_new = data[0];
+//     unsigned priority_top = buf[1];
+//     if (priority_new > priority_top) {
       
-    }
+//     }
     return false;
   }
 
@@ -212,6 +188,8 @@ bool UARTBus::queuePush(queue_t &queue, const uint8_t *data, unsigned len) {
 
 #if defined(ARDUINO_ARCH_RP2040)
     queue_add_blocking(&queue, buf);
+#elif defined(ESP32)
+    xQueueSend(queue, buf, 1000);
 #endif
 
     n += 8;
@@ -229,6 +207,8 @@ unsigned UARTBus::queuePop(queue_t &queue, uint8_t *data) {
 
 #if defined(ARDUINO_ARCH_RP2040)
   queue_peek_blocking(&queue, buf);
+#elif defined(ESP32)
+  xQueuePeek(queue, buf, 1000);
 #endif
 
   unsigned len = buf[0];
@@ -237,6 +217,8 @@ unsigned UARTBus::queuePop(queue_t &queue, uint8_t *data) {
 
 #if defined(ARDUINO_ARCH_RP2040)
   queue_remove_blocking(&queue, buf);
+#elif defined(ESP32)
+  xQueueReceive(queue, buf, 1000);
 #endif
 
   for (unsigned i = 0; i < 7; i++) {
@@ -245,7 +227,13 @@ unsigned UARTBus::queuePop(queue_t &queue, uint8_t *data) {
 
   for (unsigned i = 7; i < len; i += 8) {
 #if defined(ARDUINO_ARCH_RP2040)
-    if (data != nullptr) queue_remove_blocking(&queue, data + i);
+    if (data != nullptr) {
+#if defined(ARDUINO_ARCH_RP2040)
+      queue_remove_blocking(&queue, data + i);
+#elif defined(ESP32)
+      xQueueReceive(queue, data + i, 1000);
+#endif
+    }
 #endif
   }
 
@@ -255,8 +243,8 @@ unsigned UARTBus::queuePop(queue_t &queue, uint8_t *data) {
 inline unsigned UARTBus::queueSize(queue_t &queue) {
 #if defined(ARDUINO_ARCH_RP2040)
   return queue_get_level(&queue) * 8;
-#else
-  return 0;
+#elif defined(ESP32)
+  return uxQueueMessagesWaiting(queue);
 #endif
 }
 

@@ -73,6 +73,8 @@ bool Bus::begin() {
   self_node_ = readEEPROM(NODE_ID_ADDR) % NODE_MAX;
   self_unique_ = getUnique();
 
+//  filterChanged();
+
   return true;
 }
 
@@ -85,20 +87,24 @@ void Bus::update() {
 }
 
 void Bus::sendAnomaly(uint8_t category, const char *info, bool send_bus) {
-  PacketN<1> anomaly(TELEMETRY, ID_ANOMALY, FROM_LOCAL, TO_LOCAL);
-  anomaly.entries[0].set(category, (const uint8_t*)info);
+  uint8_t buf[BUF_SIZE(1)];
+  Packet anomaly(buf, sizeof(buf));
+  anomaly.set(TELEMETRY, ID_ANOMALY, FROM_LOCAL, TO_LOCAL);
+  anomaly.begin().append(category, info, 4);
   if (send_bus) send(anomaly);
 }
 
 void Bus::sendHeartbeat() {
-  PacketN<1> heartbeat(TELEMETRY, ID_HEARTBEAT, FROM_LOCAL, TO_LOCAL);
-  heartbeat.entries[0].set('u', self_unique_);
+  uint8_t buf[BUF_SIZE(1)];
+  Packet heartbeat(buf, sizeof(buf));
+  heartbeat.set(TELEMETRY, ID_HEARTBEAT, FROM_LOCAL, TO_LOCAL);
+  heartbeat.begin().append('u', self_unique_);
   send(heartbeat);
 }
 
 void Bus::receivedHeartbeat(Packet &packet) {
-  uint32_t unique = packet.entries[0].payload.uint;
-  if (packet.node == self_node_ && unique != self_unique_) {
+  uint32_t unique = packet.begin().uint32();
+  if (packet.node() == self_node_ && unique != self_unique_) {
     error();
     sendAnomaly('B', "CFLT");
 
@@ -113,19 +119,20 @@ void Bus::receivedHeartbeat(Packet &packet) {
   }
 }
 
-void Bus::sendTestPacket() {
-  static unsigned n = 0;
+// void Bus::sendTestPacket() {
+//   static unsigned n = 0;
 
-  PacketN<32> test(TELEMETRY, 'z', system_, TO_LOCAL, n);
 
-  if (!availableForSend(test))
-    return;
+//   PacketN<32> test(TELEMETRY, 'z', system_, TO_LOCAL, n);
 
-  for (unsigned i = 0; i < n; i++) {
-    test.entries[i].set('I', self_unique_);
-  }
+//   if (!availableForSend(test))
+//     return;
 
-  send(test);
+//   for (unsigned i = 0; i < n; i++) {
+//     test.entries[i].set('I', self_unique_);
+//   }
 
-  n = (n + 1) % 32;
-}
+//   send(test);
+
+//   n = (n + 1) % 32;
+// }
