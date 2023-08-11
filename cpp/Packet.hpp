@@ -23,8 +23,8 @@
 
 class float16 {
 public:
-  float16(float value);
-  float toFloat() const;
+  float16(float value = 0.0f);
+  float toFloat32() const;
 protected:
   uint16_t raw_;
 };
@@ -42,44 +42,13 @@ public:
     uint8_t view[4];
     return *reinterpret_cast<const T *>(decode(view));
   }
-  inline uint32_t uint32() const { return as<uint32_t>(); }
-  inline uint16_t uint16() const { return as<uint16_t>(); }
-  inline uint8_t uint8() const { return as<uint8_t>(); }
-  inline int32_t int32() const { return as<int32_t>(); }
-  inline int16_t int16() const { return as<int16_t>(); }
-  inline int8_t int8() const { return as<int8_t>(); }
-  inline float float32() const { return as<float>(); }
-  float float16() const;
 
   Entry& append(uint8_t type, const uint8_t *bytes, unsigned size);
   template <typename T>
-  inline Entry &append(uint8_t type, T value, unsigned size) {
-    return append(type, reinterpret_cast<const uint8_t *>(&value), size);
+  inline Entry &append(uint8_t type, T value) {
+    return append(type, reinterpret_cast<const uint8_t *>(&value), sizeof(T));
   }
   inline Entry &append(uint8_t type) { return append(type, 0, 0); }
-  inline Entry &append(uint8_t type, uint32_t value) {
-    return append(type, value, 4);
-  }
-  inline Entry &append(uint8_t type, uint16_t value) {
-    return append(type, value, 2);
-  }
-  inline Entry &append(uint8_t type, uint8_t value) {
-    return append(type, value, 1);
-  }
-  inline Entry &append(uint8_t type, int32_t value) {
-    return append(type, value, 4);
-  }
-  inline Entry &append(uint8_t type, int16_t value) {
-    return append(type, value, 2);
-  }
-  inline Entry &append(uint8_t type, int8_t value) {
-    return append(type, value, 1);
-  }
-  inline Entry &append(uint8_t type, float value) {
-    return append(type, value, 4);
-  }
-
-  Entry &appendFloat16(uint8_t type, float value);
 
   Entry next() const;
   uint8_t *operator*();
@@ -134,10 +103,14 @@ public:
   void clear();
 
   inline Entry begin() { return Entry(this, 4, 0); };
+  inline const Entry begin() const {
+    return Entry(const_cast<Packet*>(this), 4, 0);
+  };
   inline Entry end() { return end_; };
   inline const Entry end() const { return end_; };
 
   Entry find(uint8_t type, uint8_t index = 0);
+  const Entry find(uint8_t type, uint8_t index = 0) const;
 
   Packet &operator=(const Packet &another);
   bool copyTo(Packet& another) const;

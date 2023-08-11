@@ -82,7 +82,7 @@ const Packet CANBus::receive() {
       continue;
     }
 
-    if (rd.frame_count + 1 == rd.frame_num & !(*itr).isFree()) {
+    if (rd.frame_count + 1 == rd.frame_num && !(*itr).isFree()) {
 
       unsigned len = (*itr).size() - sizeof(rd);
       last_received_ = Packet(rd.data, len, len);
@@ -136,12 +136,14 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
         memcpy(rd.data + frame_count * 8, data, dlc);
         rd.frame_count++;
 
-        if (rd.frame_count + 1 == rd.frame_num
-            && (rd.kind_id & 0b01111111) == ID_HEARTBEAT) {
-          (*itr).free();
+        if (rd.frame_count + 1 == rd.frame_num) {
           unsigned len = (*itr).size() - sizeof(rd);
-          Packet heartbeat(rd.data, len, len);
-          receivedHeartbeat(heartbeat);
+          Packet packet(rd.data, len, len);
+          receivedPacket(packet);
+
+          if (packet.id() == ID_HEARTBEAT) {
+            (*itr).free();
+          }
         }
 
         break;

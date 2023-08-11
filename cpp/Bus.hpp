@@ -7,6 +7,7 @@
 #endif
 
 #include "Packet.hpp"
+#include "Shared.hpp"
 
 
 #ifndef HEARTBEAT_FREQ
@@ -90,7 +91,9 @@ public:
   Bus(uint8_t system, uint8_t node_name);
 
   virtual bool begin();
+  virtual void update();
 
+  // Packet filter
   virtual void listenAll() {
     filter_.setAll();
   }
@@ -100,25 +103,34 @@ public:
   }
   inline bool filter(uint8_t id) const {return filter_.isSet(id); }
 
-  virtual void update();
 
+  // Sending Packet
   virtual bool send(Packet &packet) = 0;
-
-  const Packet receive();
-
   virtual bool availableForSend(const Packet &packet) = 0;
 
+  virtual const Packet receive() = 0;
+
+  // Error
   inline void error() { error_count_++; };
   inline void dropped(){ dropped_count_++; };
   inline unsigned getErrorCount() const { return error_count_; }
   virtual inline unsigned getDroppedCount() const { return dropped_count_; }
 
   void sendAnomaly(uint8_t category, const char *info, bool send_bus = true);
-  void sendHeartbeat();
+
+
+  // Shared variables
+  template <typename T>
+  void subscribe(Shared<T> &variable, unsigned timeout_millis = NEVER) {
+    shared_.add(variable, timeout_millis);
+    listen(TELEMETRY, variable.packetId());
+    listen(COMMAND, variable.packetId());
+  }
+
+  void insert(Shared<uint32_t> &variable);
 
   // void sendTestPacket();
 
-  void receivedHeartbeat(Packet &packet);
 
 protected:
   uint8_t system_;
@@ -128,6 +140,8 @@ protected:
   uint32_t self_unique_;
   NodeInfo nodes[NODE_MAX];
 
+  unsigned long heartbeat_millis_;
+
   unsigned error_count_;
   uint8_t  error_code_[4];
   unsigned dropped_count_;
@@ -136,18 +150,16 @@ protected:
 
   BitFilter<BUS_FILTER_WIDTH> filter_;
 
+  SharedVariables shared_;
 
-  virtual unsigned receive(uint8_t*& buf) = 0;
+  void sendHeartbeat();
+  void receivedPacket(const Packet &packet);
 
-
-private:
-
-  unsigned long heartbeat_millis_;
 };
 
 
-unsigned getMillis();
+extern unsigned getMillis();
 
-uint8_t readEEPROM(unsigned addr);
-void writeEEPROM(unsigned addr, uint8_t value);
-unsigned getUnique();
+extern uint8_t readEEPROM(unsigned addr);
+extern void writeEEPROM(unsigned addr, uint8_t value);
+extern unsigned getUnique();

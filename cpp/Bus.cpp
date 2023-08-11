@@ -90,7 +90,7 @@ void Bus::sendAnomaly(uint8_t category, const char *info, bool send_bus) {
   uint8_t buf[BUF_SIZE(1)];
   Packet anomaly(buf, sizeof(buf));
   anomaly.set(TELEMETRY, ID_ANOMALY, FROM_LOCAL, TO_LOCAL);
-  anomaly.begin().append(category, info, 4);
+  anomaly.begin().append(category, reinterpret_cast<const uint8_t*>(info), 4);
   if (send_bus) send(anomaly);
 }
 
@@ -102,20 +102,25 @@ void Bus::sendHeartbeat() {
   send(heartbeat);
 }
 
-void Bus::receivedHeartbeat(Packet &packet) {
-  uint32_t unique = packet.begin().uint32();
-  if (packet.node() == self_node_ && unique != self_unique_) {
-    error();
-    sendAnomaly('B', "CFLT");
+void Bus::receivedPacket(const Packet &packet) {
+  if (packet.id() == ID_HEARTBEAT) {
+    uint32_t unique = packet.find('u').as<uint32_t>();
+    if (packet.node() == self_node_ && unique != self_unique_) {
+      error();
+      sendAnomaly('B', "CFLT");
 
-    if (unique >= self_unique_) {
-      self_node_ = (self_node_ + 1) % NODE_MAX;
+      if (unique >= self_unique_) {
+        self_node_ = (self_node_ + 1) % NODE_MAX;
 
-      writeEEPROM(NODE_ID_ADDR, self_node_);
+        writeEEPROM(NODE_ID_ADDR, self_node_);
 
-      // Serial.printf("CHANGE SELF ID %d\n", self_node_);
-      nodes[self_node_].reset();
+        // Serial.printf("CHANGE SELF ID %d\n", self_node_);
+        nodes[self_node_].reset();
+      }
     }
+  }
+  else {
+    shared_.update(packet);
   }
 }
 

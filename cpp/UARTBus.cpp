@@ -133,12 +133,10 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
       uint8_t seq = decoded[3];
       bool received_first = nodes[node_id].received(seq);
 
-      if ((decoded[0] & 0b01111111) == ID_HEARTBEAT) {
-        Packet heartbeat(decoded, len - 1);
-        receivedHeartbeat(heartbeat);
-        sendViaDebugSerial(buf, count);
-      }
-      else if (received_first) {
+      if (received_first) {
+        Packet packet(decoded, len - 1);
+        receivedPacket(packet);
+
         another_serial.write(buf, count);
 
         if (filter(id)) {
@@ -146,8 +144,9 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
             dropped();
             sendAnomaly('B', "RDRP");
           }
-          sendViaDebugSerial(buf, count);
         }
+
+        sendViaDebugSerial(buf, count);
       }
 
       count = 0;
