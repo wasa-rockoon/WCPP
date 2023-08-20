@@ -171,8 +171,11 @@ void Packet::set(Kind kind, uint8_t id, uint8_t from, uint8_t dest) {
   buf[1] = ((from & 0b111) << 5) | (buf[1] & 0b11111);
   buf[2] = ((dest & 0b111) << 5) | (buf[2] & 0b11111);
 }
-void Packet::set_(uint8_t node, uint8_t seq) {
+
+void Packet::setNode(uint8_t node) {
   buf[1] = (buf[1] & 0b11100000) | (node & 0b11111);
+}
+void Packet::setSeq(uint8_t seq) {
   buf[3] = seq;
 }
 

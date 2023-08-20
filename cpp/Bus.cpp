@@ -35,38 +35,35 @@ bool BloomFilter32::isSet(unsigned key) const {
 
 
 bool NodeInfo::received(uint8_t seq) {
-  if (first_millis == 0 || seq - first_seq < 128) { // first time received
+  if (received_millis == 0 || seq - first_seq < 128) { // first time received
 
     if (first_seq == 255) {
       if (seq != 0)
         lost_count += seq;
-    } else if (seq != first_seq + 1 && first_millis != 0) {
+    } else if (seq != first_seq + 1 && received_millis != 0) {
       lost_count += seq - first_seq;
     }
 
     received_count++;
 
     first_seq = seq;
-    first_millis = getMillis();
+    received_millis = getMillis();
     return true;
-  } else {
-    second_seq = seq;
-    second_millis = getMillis();
+  }
+  else {
     return false;
   }
 }
 
 void NodeInfo::reset() {
   first_seq = 0;
-  second_seq = 0;
   received_count = 0;
   lost_count = 0;
-  first_millis = 0;
-  second_millis = 0;
+  received_millis = 0;
 }
 
-Bus::Bus(uint8_t system, uint8_t node_name)
-  : system_(system), self_name_(node_name) {
+Bus::Bus(uint8_t unit, uint8_t node_name)
+  : unit_(unit), self_name_(node_name) {
 }
 
 bool Bus::begin() {
@@ -95,16 +92,25 @@ void Bus::sendAnomaly(uint8_t category, const char *info, bool send_bus) {
 }
 
 void Bus::sendHeartbeat() {
-  uint8_t buf[BUF_SIZE(1)];
+  uint8_t buf[BUF_SIZE(3)];
   Packet heartbeat(buf, sizeof(buf));
   heartbeat.set(TELEMETRY, ID_HEARTBEAT, FROM_LOCAL, TO_LOCAL);
-  heartbeat.begin().append('u', self_unique_);
-  send(heartbeat);
+  heartbeat.begin()
+    .append('u', self_unique_)
+    .append('n', self_name_)
+    .append('s', sanity_bits_);
+    send(heartbeat);
 }
 
 void Bus::receivedPacket(const Packet &packet) {
   if (packet.id() == ID_HEARTBEAT) {
     uint32_t unique = packet.find('u').as<uint32_t>();
+    uint8_t  name = packet.find('n').as<uint8_t>();
+    uint32_t sanity_bits = packet.find('s').as<uint32_t>();
+
+    nodes[packet.node()].name = name;
+    nodes[packet.node()].sanity_bits = sanity_bits;
+
     if (packet.node() == self_node_ && unique != self_unique_) {
       error();
       sendAnomaly('B', "CFLT");
@@ -128,7 +134,7 @@ void Bus::receivedPacket(const Packet &packet) {
 //   static unsigned n = 0;
 
 
-//   PacketN<32> test(TELEMETRY, 'z', system_, TO_LOCAL, n);
+//   PacketN<32> test(TELEMETRY, 'z', unit_, TO_LOCAL, n);
 
 //   if (!availableForSend(test))
 //     return;

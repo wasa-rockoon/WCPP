@@ -2,8 +2,9 @@
   "name": "wccp",
   "version": "0.1.0",
   "description": "WASA Common Command&Telemetry Protocol",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/typescript/index.js",
+  "types": "dist/typescript/index.d.ts",
+  "typings": "dist/typescript/index.d.ts",
   "scripts": {
     "build": "tsc",
     "prepare": "npm run build",

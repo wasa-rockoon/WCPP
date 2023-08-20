@@ -23,8 +23,8 @@ void CANReceived(uint32_t ext_id, uint8_t *data, uint8_t len) {
   canbus_instance->received(ext_id, data, len);
 }
 
-CANBus::CANBus(uint8_t system, uint8_t node_name)
-  : Bus(system, node_name), buf_(buf_buf_, CANBUS_BUFFER_SIZE),
+CANBus::CANBus(uint8_t unit, uint8_t node_name)
+  : Bus(unit, node_name), buf_(buf_buf_, CANBUS_BUFFER_SIZE),
     last_received_(nullptr, 0) {
   canbus_instance = this;
 }
@@ -45,7 +45,8 @@ void CANBus::update() {
 
 
 bool CANBus::send(Packet &packet) {
-  packet.set_(self_node_, self_seq_);
+  packet.setNode(self_node_);
+  packet.setSeq(self_seq_);
   self_seq_++;
 
   uint8_t frame_num = (packet.len + 7) / 8;

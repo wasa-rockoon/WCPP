@@ -19,7 +19,9 @@ void SharedVariables::update(const Packet &packet) {
     if (packet.id() == variable->packet_id_) {
       while (variable != nullptr) {
         for (Entry entry = packet.begin(); entry != packet.end(); ++entry) {
-          if (entry.type() == variable->entry_type_) {
+          if (entry.type() == variable->entry_type_ &&
+              (variable->packet_from_ == 0xFF ||
+               packet.from() == variable->packet_from_)) {
             variable->value_ = entry.as<uint32_t>();
             variable->last_updated_millis_ = getMillis();
             break;

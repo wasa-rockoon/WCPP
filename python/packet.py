@@ -10,28 +10,36 @@ class Payload:
         self.buf = b'\x00\x00\x00\x00'
 
     @property
-    def int8(self) -> int:
+    def int8(self) -> Optional[int]:
+        if len(self.buf) < 1: return None
         return struct.unpack('<b', self.buf)[0]
     @property
-    def int16(self) -> int:
+    def int16(self) -> Optional[int]:
+        if len(self.buf) < 2: return None
         return struct.unpack('<h', self.buf)[0]
     @property
-    def int32(self) -> int:
+    def int32(self) -> Optional[int]:
+        if len(self.buf) < 4: return None
         return struct.unpack('<i', self.buf)[0]
     @property
-    def uint8(self) -> int:
+    def uint8(self) -> Optional[int]:
+        if len(self.buf) < 1: return None
         return struct.unpack('<B', self.buf)[0]
     @property
-    def uint16(self) -> int:
+    def uint16(self) -> Optional[int]:
+        if len(self.buf) < 2: return None
         return struct.unpack('<H', self.buf)[0]
     @property
-    def uint32(self) -> int:
+    def uint32(self) -> Optional[int]:
+        if len(self.buf) < 4: return None
         return struct.unpack('<I', self.buf)[0]
     @property
-    def float16(self) -> float:
+    def float16(self) -> Optional[float]:
+        if len(self.buf) < 2: return None
         return struct.unpack('<e', self.buf)[0]
     @property
-    def float32(self) -> float:
+    def float32(self) -> Optional[float]:
+        if len(self.buf) < 4: return None
         return struct.unpack('<f', self.buf)[0]
 
 

@@ -11,9 +11,9 @@ FastCRC8 CRC8;
 
 
 
-UARTBus::UARTBus(Stream &upper_serial, Stream &lower_serial, uint8_t system,
+UARTBus::UARTBus(Stream &upper_serial, Stream &lower_serial, uint8_t unit,
                  uint8_t node_name)
-    : Bus(system, node_name), upper_serial_(upper_serial),
+    : Bus(unit, node_name), upper_serial_(upper_serial),
       lower_serial_(lower_serial) {}
 
 bool UARTBus::begin() {
@@ -49,7 +49,8 @@ inline bool UARTBus::availableForSend(const Packet &packet) {
 
 
 bool UARTBus::send(Packet &packet) {
-  packet.set_(self_node_, self_seq_);
+  packet.setNode(self_node_);
+  packet.setSeq(self_seq_);
   self_seq_++;
 
   if (!queuePush(send_queue_, packet.buf, packet.len)) {
@@ -252,9 +253,9 @@ void UARTBus::printNodeInfo() {
   Serial.printf("  self: %d #%d\n", self_node_, self_seq_);
   for (unsigned i = 0; i < NODE_MAX; i++) {
     NodeInfo& n = nodes[i];
-    if (n.first_millis == 0) continue;
-    Serial.printf("  %2d (#%3d #%3d) R%d L%d\n",
-                  i, n.first_seq, n.second_seq, n.received_count, n.lost_count);
+    if (n.first_seq == 0) continue;
+    Serial.printf("  %2d (#%3d) R%d L%d\n",
+                  i, n.first_seq, n.received_count, n.lost_count);
   }
 }
 

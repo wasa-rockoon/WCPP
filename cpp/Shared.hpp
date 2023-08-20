@@ -10,12 +10,11 @@ class SharedVariables;
 
 template <typename T> class Shared {
 public:
-  Shared(uint8_t packet_id, uint8_t entry_type)
-    : packet_id_(packet_id), entry_type_(entry_type), last_updated_millis_(NEVER),
-      next_id_(nullptr), next_(nullptr) {}
-  Shared(uint8_t packet_id, uint8_t entry_type, T initial_value)
-    : packet_id_(packet_id), entry_type_(entry_type), value_(initial_value),
-      last_updated_millis_(0), next_id_(nullptr), next_(nullptr) {}
+  Shared(): last_updated_millis_(NEVER), next_id_(nullptr), next_(nullptr) {}
+  Shared(T initial_value)
+    : value_(initial_value), last_updated_millis_(0), next_id_(nullptr),
+      next_(nullptr) {}
+
 
   inline T value() { return value_; }
   unsigned age() {
@@ -41,6 +40,7 @@ public:
 
 private:
   uint8_t packet_id_;
+  uint8_t packet_from_;
   uint8_t entry_type_;
   T value_;
   unsigned timeout_millis_;
@@ -59,9 +59,13 @@ class SharedVariables {
 public:
   void update(const Packet& packet);
 
-  template <typename T> inline void add(Shared<T>& variable,
-                                        unsigned timeout_millis = NEVER) {
+  template <typename T> inline void
+  add(Shared<T>& variable, uint8_t packet_id, uint8_t entry_type,
+      uint8_t packet_from = 0xFF, unsigned timeout_millis = NEVER) {
     variable.timeout_millis_ = timeout_millis;
+    variable.packet_id_ = packet_id;
+    variable.entry_type_ = entry_type;
+    variable.packet_from_ = packet_from;
     insert(variable.cast());
   }
 

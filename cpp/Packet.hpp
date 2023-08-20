@@ -96,9 +96,11 @@ public:
   inline uint8_t seq() const { return buf[3]; }
 
   void set(Kind kind, uint8_t id, uint8_t from, uint8_t dest);
-  void set_(uint8_t node, uint8_t seq);
-  inline void from(uint8_t system) {
-    buf[1] = ((system & 0b111) << 5) | (buf[1] & 0b11111);
+  void setSeq(uint8_t seq);
+  void setNode(uint8_t node);
+
+  inline void from(uint8_t unit) {
+    buf[1] = ((unit & 0b111) << 5) | (buf[1] & 0b11111);
   }
   void clear();
 

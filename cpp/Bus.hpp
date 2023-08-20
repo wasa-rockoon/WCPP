@@ -73,14 +73,13 @@ struct NodeInfo {
   uint8_t name;
 
   uint8_t first_seq;
-  uint8_t second_seq;
 
-#ifndef NO_DETAIL_NODE_INFO
-  unsigned received_count;
-  unsigned lost_count;
-  unsigned long first_millis;
-  unsigned long second_millis;
-#endif
+  uint8_t sanity_bits;
+
+  uint16_t received_count;
+  uint16_t lost_count;
+  unsigned long received_millis;
+
 
   bool received(uint8_t seq); // return true when first time received
   void reset();
@@ -121,8 +120,9 @@ public:
 
   // Shared variables
   template <typename T>
-  void subscribe(Shared<T> &variable, unsigned timeout_millis = NEVER) {
-    shared_.add(variable, timeout_millis);
+  void subscribe(Shared<T> &variable, uint8_t packet_id, uint8_t entry_type,
+                 uint8_t packet_from = 0xFF, unsigned timeout_millis = NEVER){
+    shared_.add(variable, packet_id, entry_type, packet_from, timeout_millis);
     listen(TELEMETRY, variable.packetId());
     listen(COMMAND, variable.packetId());
   }
@@ -133,7 +133,7 @@ public:
 
 
 protected:
-  uint8_t system_;
+  uint8_t unit_;
   uint8_t self_name_;
   uint8_t self_node_;
   uint8_t self_seq_;
@@ -146,7 +146,7 @@ protected:
   uint8_t  error_code_[4];
   unsigned dropped_count_;
 
-  uint32_t sanity_;
+  uint32_t sanity_bits_;
 
   BitFilter<BUS_FILTER_WIDTH> filter_;
 
