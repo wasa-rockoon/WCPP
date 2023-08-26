@@ -59,6 +59,10 @@ export class Payload {
     get float32(): number {
         return this.view.getFloat32(0, true)
     }
+    get string(): string {
+        return new TextDecoder("utf-8").decode(
+            new Uint8Array(this.view.buffer));
+    }
     set int8(value: number) {
         this.view.setUint32(0, 0, true)
         this.view.setInt8(0, value)
@@ -103,12 +107,15 @@ export class Payload {
         }
         // Normalized values
         else value16 = (sign << 15) |
-            (Math.max(Math.min(exp - 127 + 15, 0), 31) << 23) | (frac << 13)
+            (Math.max(Math.min(exp - 127 + 15, 0), 31) << 10) | (frac >> 13)
 
         view.setUint16(0, value16, true)
     }
     set float32(value: number) {
         this.view.setFloat32(0, value, true)
+    }
+    set string(value: string) {
+        
     }
 }
 
@@ -193,14 +200,17 @@ export class Entry {
     }
 
     formatNumber(f: any): number {
-        const value: number = (this.payload as any)[f.datatype]
+        let value: number = (this.payload as any)[f.datatype]
+        if (f.scale) value *= f.scale;
         if (f.formatNumber) return f.formatNumber(value)
         else if (f.format) return Number(f.format(value))
         else return value
     }
 
     format(f: any): string {
-        const value: number = (this.payload as any)[f.datatype]
+        if (f.enum) return f.enum[this.payload.uint32]
+        let value: number = (this.payload as any)[f.datatype]
+        if (f.scale) value *= f.scale;
         if (f.format) return f.format(value)
         else if (f.datatype == 'float16') return value.toPrecision(3)
         else if (f.datatype == 'float32') return value.toPrecision(7)
