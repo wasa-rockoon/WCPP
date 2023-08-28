@@ -57,6 +57,7 @@ private:
 
 class SharedVariables {
 public:
+  SharedVariables(): root_(nullptr) {}
   void update(const Packet& packet);
 
   template <typename T> inline void

@@ -6,9 +6,9 @@
 float16::float16(float value) {
   uint32_t value32 = *reinterpret_cast<uint32_t *>(&value);
   uint16_t value16;
-  unsigned sign = value32 >> 31;
-  unsigned exp = (value32 >> 23) & 0xFF;
-  unsigned frac = value32 & 0x007FFFFF;
+  volatile unsigned sign = value32 >> 31;
+  volatile unsigned exp = (value32 >> 23) & 0xFF;
+  volatile unsigned frac = value32 & 0x007FFFFF;
 
   if (exp == 0) {
     if (frac == 0)
@@ -24,8 +24,8 @@ float16::float16(float value) {
   // Normalized values
   else {
     value16 = (sign << 15) |
-              (std::max(std::min((int)exp - 127 + 15, 0), 31) << 23) |
-              (frac << 13);
+              (std::min(std::max((int)exp - 127 + 15, 0), 31) << 10) |
+              (frac >> 13);
   }
   raw_ = value16;
 }
@@ -105,17 +105,18 @@ Entry& Entry::append(uint8_t type, const uint8_t *bytes, unsigned size) {
 }
 
 Entry Entry::next() const {
-  if (ptr_ + 1 + size() <= packet_->len) {
-    return Entry(packet_, ptr_ + 1 + size(), count_ + 1);
+  if (ptr_ + 1 + size() < packet_->len && count_ + 1 < packet_->size()) {
+    return Entry(packet_, ptr_ + 1 + (unsigned)size(), count_ + 1);
   }
-  else return *this;
+  else return packet_->end_;
 }
 uint8_t* Entry::operator*() { return packet_->buf + ptr_ + 1; }
 Entry& Entry::operator++() {
-  if (ptr_ + 1 + size() < packet_->len) {
+  if (ptr_ + 1 + size() < packet_->len && count_ + 1 < packet_->size()) {
     ptr_ += 1 + (unsigned)size();
-  }
-  else *this = packet_->end_;
+    count_++;
+  } else
+    *this = packet_->end_;
   return *this;
 }
 Entry Entry::operator++(int) {
@@ -161,7 +162,9 @@ Packet::Packet(const Packet& packet)
     end_(packet.end_) {}
 
 Packet::Packet(uint8_t *buf, unsigned buf_size)
-  : buf(buf), buf_size(buf_size), len(4), end_(this, 4, 0) {};
+    : buf(buf), buf_size(buf_size), len(4), end_(this, 4, 0) {
+  if (buf != nullptr) memset(buf, 0, 4);
+};
 Packet::Packet(uint8_t *buf, unsigned buf_size, unsigned len)
     : buf(buf), buf_size(buf_size), len(len),
       end_(this, len, buf[2] & 0b11111) {};
@@ -224,7 +227,7 @@ bool Packet::copyTo(Packet& another) const {
   if (len > another.buf_size) return false;
   another.len = len;
   memcpy(another.buf, buf, len);
- another.end_ = Entry(&another, end_.ptr_, end_.count_);
+  another.end_ = Entry(&another, end_.ptr_, end_.count_);
   return true;
 }
 
@@ -250,5 +253,5 @@ void Packet::print() {
 
 void Packet::setEnd(Entry &entry) {
   end_ = entry;
-  setSize(entry.count_);
+  setSize(entry.count_ - 1);
 }

@@ -10,20 +10,17 @@
 class CANBus: public Bus {
 public:
 
-  CANBus(uint8_t unit, uint8_t node_name);
+  CANBus(uint8_t node_name);
 
   bool begin() override;
 
   void update() override;
 
   bool send(Packet &packet) override;
+
   const Packet receive() override;
 
   bool availableForSend(const Packet &packet) override { return true; };
-
-  inline unsigned getDroppedCount() const override {
-    return dropped_count_ + buf_.getOverflowCount();
-  }
 
   void listenAll() override {
     filter_.setAll();

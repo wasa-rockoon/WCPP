@@ -23,8 +23,8 @@ void CANReceived(uint32_t ext_id, uint8_t *data, uint8_t len) {
   canbus_instance->received(ext_id, data, len);
 }
 
-CANBus::CANBus(uint8_t unit, uint8_t node_name)
-  : Bus(unit, node_name), buf_(buf_buf_, CANBUS_BUFFER_SIZE),
+CANBus::CANBus(uint8_t node_name)
+  : Bus(node_name), buf_(buf_buf_, CANBUS_BUFFER_SIZE),
     last_received_(nullptr, 0) {
   canbus_instance = this;
 }
@@ -40,6 +40,15 @@ bool CANBus::begin() {
 
 void CANBus::update() {
   Bus::update();
+
+  static unsigned overflow_count = 0;
+
+  unsigned new_overflow = overflow_count - buf_.getOverflowCount();
+  if (new_overflow > 0) {
+    error("BOF");
+    error_count_ += new_overflow;
+    overflow_count += new_overflow;
+  }
 }
 
 
@@ -61,14 +70,18 @@ bool CANBus::send(Packet &packet) {
       frame[0] = packet.len;
       frame[1] = frame_num;
     }
-    if (!CANSend(ext_id, frame, std::min((unsigned)8, packet.len - frame_count * 8)))
+    if (!CANSend(ext_id, frame,
+                 std::min((unsigned)8, packet.len - frame_count * 8))) {
+      error("BCS");
       return false;
+    }
     ext_id++;
   }
   return true;
 }
 
 const Packet CANBus::receive() {
+  buf_.unlock();
   SectionBuf<ReceivedData>::iterator itr = buf_.begin();
   if (itr == buf_.end()) return Packet();
 
@@ -87,6 +100,7 @@ const Packet CANBus::receive() {
 
       unsigned len = (*itr).size() - sizeof(rd);
       last_received_ = Packet(rd.data, len, len);
+      buf_.lock(itr);
 
       break;
     }
@@ -96,6 +110,8 @@ const Packet CANBus::receive() {
 }
 
 void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
+  if (!started_) return;
+
   uint8_t kind_id = ext_id >> 21;
   uint8_t from = (ext_id >> 13) & 0xFF;
   volatile uint8_t frame_count = ext_id & 0b11111;
@@ -108,6 +124,8 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
       ReceivedData &rd = (*itr).value();
       if (rd.kind_id == kind_id && rd.from == from) {
         (*itr).free();
+        buf_.pop();
+        error("BDR");
       }
       ++itr;
     }
@@ -129,8 +147,7 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
         if (rd.frame_count + 1 != frame_count) {
           (*itr).free();
           buf_.pop();
-          error();
-          sendAnomaly('B', "RBUF");
+          error("BDR");
           break;
         }
 
@@ -140,6 +157,7 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
         if (rd.frame_count + 1 == rd.frame_num) {
           unsigned len = (*itr).size() - sizeof(rd);
           Packet packet(rd.data, len, len);
+          receivedFrom(packet.node(), packet.seq());
           receivedPacket(packet);
 
           if (packet.id() == ID_HEARTBEAT) {
@@ -166,6 +184,6 @@ void CANBus::filterChanged() {
   CANSetFilter(id, mask);
 }
 
-inline uint8_t CANBus::id_field(uint8_t id) const {
-  return 0b1 << (id & 0b111);
+uint8_t CANBus::id_field(uint8_t id) const {
+  return ~(0b1 << (id & 0b111));
 }

@@ -9,11 +9,8 @@
 
 FastCRC8 CRC8;
 
-
-
-UARTBus::UARTBus(Stream &upper_serial, Stream &lower_serial, uint8_t unit,
-                 uint8_t node_name)
-    : Bus(unit, node_name), upper_serial_(upper_serial),
+UARTBus::UARTBus(uint8_t node_name, Stream &upper_serial, Stream &lower_serial)
+    : Bus(node_name), upper_serial_(upper_serial),
       lower_serial_(lower_serial) {}
 
 bool UARTBus::begin() {
@@ -54,8 +51,7 @@ bool UARTBus::send(Packet &packet) {
   self_seq_++;
 
   if (!queuePush(send_queue_, packet.buf, packet.len)) {
-    dropped();
-    sendAnomaly('B', "SDRP", false);
+    error("BSD");
     return false;
   }
   return true;
@@ -78,11 +74,6 @@ void UARTBus::checkSend() {
   unsigned encoded_len = COBS::encode(buf, len + 1, encoded);
   encoded[encoded_len] = 0;
 
-  // Serial.printf("send %d %d %d\n", buf[0], buf[1], len);
-
-  // Serial.print("S ");
-  // printlnBytes(buf, len + 3, 1);
-
   upper_serial_.write(encoded, encoded_len + 1);
   lower_serial_.write(encoded, encoded_len + 1);
 
@@ -99,8 +90,7 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
     count++;
 
     if (count + 1 >= PACKET_LEN_MAX) {
-      error();
-      sendAnomaly('B', "LEN");
+      error("BLN");
       count = 0;
       continue;
     }
@@ -110,12 +100,8 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
       uint8_t decoded[PACKET_LEN_MAX + 2];
       unsigned len = COBS::decode(buf, count - 1, decoded);
 
-      // Serial.print("R ");
-      // printlnBytes(decoded, len, 1);
-
       if (count < 2 || len == 0) {
-        error();
-        sendAnomaly('B', "NODT");
+        error("BND");
         count = 0;
         continue;
       }
@@ -123,8 +109,7 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
       uint8_t crc8 = CRC8.smbus(decoded, len - 1);
 
       if (crc8 != decoded[len - 1]) {
-        error();
-        sendAnomaly('B', "CRC");
+        error("BCR");
         count = 0;
         continue;
       }
@@ -132,7 +117,7 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
       uint8_t id = decoded[0];
       uint8_t node_id = decoded[1] & 0b11111;
       uint8_t seq = decoded[3];
-      bool received_first = nodes[node_id].received(seq);
+      bool received_first = receivedFrom(node_id, seq);
 
       if (received_first) {
         Packet packet(decoded, len - 1);
@@ -142,8 +127,7 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
 
         if (filter(id)) {
           if (!queuePush(receive_queue_, decoded, len - 1)) {
-            dropped();
-            sendAnomaly('B', "RDRP");
+            error("BRD");
           }
         }
 
@@ -254,8 +238,7 @@ void UARTBus::printNodeInfo() {
   for (unsigned i = 0; i < NODE_MAX; i++) {
     NodeInfo& n = nodes[i];
     if (n.first_seq == 0) continue;
-    Serial.printf("  %2d (#%3d) R%d L%d\n",
-                  i, n.first_seq, n.received_count, n.lost_count);
+    Serial.printf("  %2d %c (#%3d)\n", i, n.name, n.first_seq);
   }
 }
 

@@ -27,7 +27,7 @@ public:
     };
     inline void free() { buf_[1] |= 0x80; }
 
-  // private:
+  private:
     Section(uint8_t *buf): buf_(buf) {};
 
     void setSize(uint16_t size) {
@@ -91,10 +91,10 @@ public:
     friend SectionBuf;
   };
 
-  SectionBuf(): begin_(this, 0), end_(this, 0) {}
+  SectionBuf(): begin_(this, 0), end_(this, 0), lock_at_(-1) {}
 
-  SectionBuf(uint8_t * buf, unsigned size)
-    : buf_(buf), size_(size), begin_(this, 0), end_(this, 0) {
+  SectionBuf(uint8_t *buf, unsigned size)
+    : buf_(buf), size_(size), begin_(this, 0), end_(this, 0), lock_at_(-1) {
     memset(buf, 0, size);
   };
 
@@ -121,18 +121,27 @@ public:
   }
   iterator alloc(uint16_t size) {
     if (end_.ptr_ + size + sizeof(uint16_t) >= size_) {
-      while (begin().ptr_ > end_.ptr_) {
-        (*begin_).free();
+      while (begin_.ptr_ > end_.ptr_) {
+        if (begin_.ptr_ != lock_at_) {
+          (*begin_).free();
+          overflow_count_++;
+        }
         begin_.step();
-        overflow_count_++;
       }
       (*end_).setSize(size);
       end_.ptr_ = 0;
     }
     while (end_.ptr_ < begin_.ptr_ &&
-           begin_.ptr_ <= end_.ptr_ + sizeof(uint16_t)) {
-      ++begin_;
-      overflow_count_++;
+           begin_.ptr_ <= end_.ptr_ + size + sizeof(uint16_t)) {
+      if (begin_.ptr_ == lock_at_) {
+        begin_.step();
+        end_.ptr_ = begin_.ptr_;
+      }
+      else {
+        (*begin_).free();
+        begin_.step();
+        overflow_count_++;
+      }
     }
     (*end_).setSize(size);
     iterator at = end_;
@@ -141,15 +150,21 @@ public:
     return at;
   }
 
+
+  inline void lock(iterator at) { lock_at_ = at.ptr_; }
+  inline void unlock() { lock_at_ = -1; }
+
   inline unsigned getOverflowCount() const { return overflow_count_; }
 
-  // private:
+private:
 
   uint8_t *buf_;
   unsigned size_;
 
   iterator begin_;
   iterator end_;
+
+  int lock_at_;
 
   unsigned overflow_count_;
 };

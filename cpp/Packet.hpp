@@ -25,6 +25,7 @@ class float16 {
 public:
   float16(float value = 0.0f);
   float toFloat32() const;
+  inline uint16_t getRaw() { return raw_; }
 protected:
   uint16_t raw_;
 };
@@ -95,7 +96,8 @@ public:
   inline uint8_t size() const { return buf[2] & 0b11111; }
   inline uint8_t seq() const { return buf[3]; }
 
-  void set(Kind kind, uint8_t id, uint8_t from, uint8_t dest);
+  void set(Kind kind, uint8_t id,
+           uint8_t dest = TO_LOCAL, uint8_t from = FROM_LOCAL);
   void setSeq(uint8_t seq);
   void setNode(uint8_t node);
 

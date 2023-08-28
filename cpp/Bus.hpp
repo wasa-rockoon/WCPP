@@ -9,16 +9,22 @@
 #include "Packet.hpp"
 #include "Shared.hpp"
 
+#include <cstring>
 
 #ifndef HEARTBEAT_FREQ
 #define HEARTBEAT_FREQ 1
 #endif
 
-#define NODE_MAX 32
+#ifndef HEARTBEAT_TIMEOUT_MS
+#define HEARTBEAT_TIMEOUT_MS 5000
+#endif
+
+#define NODE_MAX 16
 #define ENTRIES_MAX 32
 
 #define ID_HEARTBEAT 0x7F
-#define ID_ANOMALY 0x7E
+#define ID_SANITY_SUMMARY '?'
+#define ID_ERROR_SUMMARY '!'
 
 #define NODE_ID_ADDR 0
 
@@ -71,23 +77,22 @@ public:
 
 struct NodeInfo {
   uint8_t name;
+  uint8_t error_count;
+  uint8_t error_code[3];
 
   uint8_t first_seq;
 
-  uint8_t sanity_bits;
+  uint16_t sanity_bits;
 
-  uint16_t received_count;
-  uint16_t lost_count;
-  unsigned long received_millis;
+  unsigned long heartbeat_millis;
 
-
-  bool received(uint8_t seq); // return true when first time received
   void reset();
+  bool alive() const;
 };
 
 class Bus {
 public:
-  Bus(uint8_t system, uint8_t node_name);
+  Bus(uint8_t node_name);
 
   virtual bool begin();
   virtual void update();
@@ -107,46 +112,58 @@ public:
   virtual bool send(Packet &packet) = 0;
   virtual bool availableForSend(const Packet &packet) = 0;
 
+  // Receiving Packet
   virtual const Packet receive() = 0;
 
-  // Error
-  inline void error() { error_count_++; };
-  inline void dropped(){ dropped_count_++; };
+  // Get status
   inline unsigned getErrorCount() const { return error_count_; }
-  virtual inline unsigned getDroppedCount() const { return dropped_count_; }
+  inline unsigned getReceivedCount() const { return received_count_; }
+  inline unsigned getLostCount() const { return lost_count_; }
 
-  void sendAnomaly(uint8_t category, const char *info, bool send_bus = true);
+  // Errors
+  inline void error(const char error_code[]) {
+    error_count_++;
+    memcpy(error_code_, error_code, 3);
+  };
+  Packet& getErrorSummary();
 
+  // Sanity chevk
+  bool sanity(unsigned bit, bool isSane);
+  bool sanity(unsigned bit) const;
+  unsigned insanity() const;
+  Packet& getSanitySummary();
 
   // Shared variables
   template <typename T>
-  void subscribe(Shared<T> &variable, uint8_t packet_id, uint8_t entry_type,
-                 uint8_t packet_from = 0xFF, unsigned timeout_millis = NEVER){
-    shared_.add(variable, packet_id, entry_type, packet_from, timeout_millis);
+  Shared<T>& subscribe(Shared<T> &variable, uint8_t packet_id,
+                       uint8_t entry_type, uint8_t packet_from = 0xFF) {
+    shared_.add(variable, packet_id, entry_type, packet_from);
     listen(TELEMETRY, variable.packetId());
     listen(COMMAND, variable.packetId());
+    return variable;
   }
-
   void insert(Shared<uint32_t> &variable);
 
   // void sendTestPacket();
 
 
 protected:
-  uint8_t unit_;
   uint8_t self_name_;
   uint8_t self_node_;
   uint8_t self_seq_;
   uint32_t self_unique_;
   NodeInfo nodes[NODE_MAX];
 
+  bool started_;
+
   unsigned long heartbeat_millis_;
 
-  unsigned error_count_;
-  uint8_t  error_code_[4];
-  unsigned dropped_count_;
+  unsigned received_count_;
+  unsigned lost_count_;
 
-  uint32_t sanity_bits_;
+  unsigned error_count_;
+  uint8_t  error_code_[3];
+  uint16_t sanity_bits_;
 
   BitFilter<BUS_FILTER_WIDTH> filter_;
 
@@ -155,6 +172,7 @@ protected:
   void sendHeartbeat();
   void receivedPacket(const Packet &packet);
 
+  bool receivedFrom(uint8_t node_id, uint8_t seq);
 };
 
 

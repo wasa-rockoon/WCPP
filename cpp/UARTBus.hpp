@@ -43,8 +43,7 @@ typedef int queue_t;
 
 class UARTBus: public Bus {
 public:
-  UARTBus(Stream &upper_serial, Stream &lower_serial, uint8_t unit,
-          uint8_t node_name);
+  UARTBus(uint8_t node_name, Stream &upper_serial, Stream &lower_serial);
 
   bool begin();
 
