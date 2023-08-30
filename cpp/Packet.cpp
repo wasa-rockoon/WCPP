@@ -71,7 +71,7 @@ uint8_t Entry::size() const {
 
 
 Entry& Entry::append(uint8_t type, const uint8_t *bytes, unsigned size) {
-  if (ptr_ + 1 + size > packet_->buf_size)
+  if (ptr_ + 1 + size > packet_->buf_size - 1 || packet_->size() >= ENTRIES_MAX)
     return *this;
 
   unsigned actual_size = size;
@@ -105,14 +105,14 @@ Entry& Entry::append(uint8_t type, const uint8_t *bytes, unsigned size) {
 }
 
 Entry Entry::next() const {
-  if (ptr_ + 1 + size() < packet_->len && count_ + 1 < packet_->size()) {
+  if (ptr_ + 1 + size() < packet_->len - 1 && count_ + 1 < packet_->size()) {
     return Entry(packet_, ptr_ + 1 + (unsigned)size(), count_ + 1);
   }
   else return packet_->end_;
 }
 uint8_t* Entry::operator*() { return packet_->buf + ptr_ + 1; }
 Entry& Entry::operator++() {
-  if (ptr_ + 1 + size() < packet_->len && count_ + 1 < packet_->size()) {
+  if (ptr_ + 1 + size() < packet_->len - 1 && count_ + 1 < packet_->size()) {
     ptr_ += 1 + (unsigned)size();
     count_++;
   } else
@@ -155,15 +155,17 @@ const uint8_t *Entry::decode(uint8_t *bytes) const {
   return bytes;
 }
 
-Packet::Packet() : buf(nullptr), buf_size(0), len(4), end_(this, 4, 0){};
+Packet::Packet() : buf(nullptr), buf_size(0), len(PACKET_MIN_LEN),
+                   end_(this, PACKET_HEADER_LEN, 0) {};
 
 Packet::Packet(const Packet& packet)
   : buf(packet.buf), buf_size(packet.buf_size), len(packet.len),
     end_(packet.end_) {}
 
 Packet::Packet(uint8_t *buf, unsigned buf_size)
-    : buf(buf), buf_size(buf_size), len(4), end_(this, 4, 0) {
-  if (buf != nullptr) memset(buf, 0, 4);
+    : buf(buf), buf_size(buf_size), len(PACKET_MIN_LEN),
+      end_(this, PACKET_HEADER_LEN, 0) {
+  if (buf != nullptr) memset(buf, 0, PACKET_HEADER_LEN);
 };
 Packet::Packet(uint8_t *buf, unsigned buf_size, unsigned len)
     : buf(buf), buf_size(buf_size), len(len),
@@ -181,13 +183,16 @@ void Packet::setNode(uint8_t node) {
 void Packet::setSeq(uint8_t seq) {
   buf[3] = seq;
 }
-
 void Packet::setSize(uint8_t n) {
   buf[2] = (buf[2] & 0b11100000) | (n & 0b11111);
 }
+void Packet::setFrom(uint8_t from) {
+  buf[1] = ((from & 0b111) << 5) | (buf[1] & 0b11111);
+}
+
 
 void Packet::clear() {
-  len = 4;
+  len = PACKET_MIN_LEN;
   setSize(0);
   end_ = begin();
 };

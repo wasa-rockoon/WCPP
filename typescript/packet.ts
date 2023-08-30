@@ -208,7 +208,7 @@ export class Entry {
     }
 
     format(f: any): string {
-        if (f.enum) return f.enum[this.payload.uint32]
+        if (f.enum) return f.enum[this.payload.uint32] || this.payload.uint32
         let value: number = (this.payload as any)[f.datatype]
         if (f.scale) value *= f.scale;
         if (f.format) return f.format(value)

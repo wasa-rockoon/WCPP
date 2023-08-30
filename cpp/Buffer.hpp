@@ -26,19 +26,20 @@ public:
       return *reinterpret_cast<T *>(buf_ + sizeof(uint16_t));
     };
     inline void free() { buf_[1] |= 0x80; }
+    inline void use() { buf_[1] &= 0x7F; }
 
   private:
     Section(uint8_t *buf): buf_(buf) {};
 
     void setSize(uint16_t size) {
       buf_[0] = size & 0xFF;
-      buf_[1] = (size & 0x7F00) >> 8;
+      buf_[1] = (size >> 8) & 0x7F;
     }
 
     uint8_t *buf_;
 
-    friend iterator;
-    friend SectionBuf;
+    friend class iterator;
+    friend class SectionBuf;
   };
 
   class iterator: public std::iterator<std::forward_iterator_tag, Section> {
@@ -143,6 +144,7 @@ public:
         overflow_count_++;
       }
     }
+    (*end_).use();
     (*end_).setSize(size);
     iterator at = end_;
     end_.step();

@@ -7,6 +7,7 @@
 #endif
 
 #include <iterator>
+#include "checksum.h"
 
 #define COMMAND 0
 #define TELEMETRY 1
@@ -18,7 +19,12 @@
 
 #define ENTRIES_MAX 32
 
-#define BUF_SIZE(size) (4 + 5 * size)
+#define ENTRY_LEN_MAX 5
+#define PACKET_HEADER_LEN 4
+#define PACKET_CRC_LEN 1
+#define PACKET_MIN_LEN (PACKET_HEADER_LEN + PACKET_CRC_LEN)
+
+#define BUF_SIZE(size) (PACKET_MIN_LEN + ENTRY_LEN_MAX * size)
 
 
 class float16 {
@@ -40,8 +46,12 @@ public:
   uint8_t size() const;
 
   template <typename T> T as() const {
-    uint8_t view[4];
+    static uint8_t view[4];
     return *reinterpret_cast<const T *>(decode(view));
+  }
+  inline const uint8_t* asBytes() const {
+    static uint8_t view[4];
+    return decode(view);
   }
 
   Entry& append(uint8_t type, const uint8_t *bytes, unsigned size);
@@ -88,6 +98,7 @@ public:
 
   inline bool isValid() { return buf != nullptr && buf_size != 0; }
 
+  inline Kind kind_id() const { return buf[0]; }
   inline Kind kind() const { return buf[0] >> 7; }
   inline uint8_t id() const { return buf[0] & 0b1111111; }
   inline uint8_t from() const { return buf[1] >> 5; }
@@ -100,15 +111,16 @@ public:
            uint8_t dest = TO_LOCAL, uint8_t from = FROM_LOCAL);
   void setSeq(uint8_t seq);
   void setNode(uint8_t node);
+  void setFrom(uint8_t from);
 
   inline void from(uint8_t unit) {
     buf[1] = ((unit & 0b111) << 5) | (buf[1] & 0b11111);
   }
   void clear();
 
-  inline Entry begin() { return Entry(this, 4, 0); };
+  inline Entry begin() { return Entry(this, PACKET_HEADER_LEN, 0); };
   inline const Entry begin() const {
-    return Entry(const_cast<Packet*>(this), 4, 0);
+    return Entry(const_cast<Packet*>(this), PACKET_HEADER_LEN, 0);
   };
   inline Entry end() { return end_; };
   inline const Entry end() const { return end_; };
@@ -118,6 +130,14 @@ public:
 
   Packet &operator=(const Packet &another);
   bool copyTo(Packet& another) const;
+
+  inline uint8_t getCRC() const { return buf[len - 1]; }
+  inline uint8_t calcCRC() const { return crc_8(buf, len - 1); }
+  inline bool checkCRC() const { return getCRC() == calcCRC(); }
+  inline uint8_t writeCRC() {
+    buf[len - 1] = calcCRC();
+    return getCRC();
+  }
 
   void print();
 

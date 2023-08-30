@@ -10,7 +10,7 @@
 class CANBus: public Bus {
 public:
 
-  CANBus(uint8_t node_name);
+  CANBus(uint8_t node_name, unsigned packet_margin = 0);
 
   bool begin() override;
 
@@ -22,16 +22,6 @@ public:
 
   bool availableForSend(const Packet &packet) override { return true; };
 
-  void listenAll() override {
-    filter_.setAll();
-    filterChanged();
-  }
-  void unlistenAll() override { filter_.clearAll(); filterChanged(); }
-  void listen(Packet::Kind kind, uint8_t id) override {
-    filter_.set((kind << 7) | id);
-    filterChanged();
-  }
-
 // protected:
   struct ReceivedData {
     uint8_t kind_id;
@@ -42,12 +32,14 @@ public:
   };
 
 
-  void filterChanged();
+  void filterChanged() override;
 
   SectionBuf<ReceivedData> buf_;
   uint8_t buf_buf_[CANBUS_BUFFER_SIZE];
 
 private:
+  unsigned packet_margin_;
+
   Packet last_received_;
 
   uint8_t id_field(uint8_t id) const;

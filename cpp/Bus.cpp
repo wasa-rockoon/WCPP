@@ -2,40 +2,9 @@
 #include "Packet.hpp"
 #include "Shared.hpp"
 #include "UARTBus.hpp"
+#include <cstring>
 
 unsigned countBits(uint16_t v);
-
-BloomFilter32::BloomFilter32(uint8_t k) {
-  k_ = k;
-  field_ = 0;
-}
-
-void BloomFilter32::set(unsigned key) {
-  unsigned key_odd = key;
-  unsigned key2 = key << 1;
-  key_odd += key2;
-  for (unsigned n = 0; n < k_; n++) {
-    field_ |= 0b1 << (key_odd & 0b11111);
-    key_odd += key2;
-  }
-}
-
-inline void BloomFilter32::setAll() { field_ = 0xFFFFFFFF; }
-
-inline void BloomFilter32::clearAll() { field_ = 0x0; }
-
-bool BloomFilter32::isSet(unsigned key) const {
-  unsigned key_odd = key;
-  unsigned key2 = key << 1;
-  key_odd += key2;
-  for (unsigned n = 0; n < k_; n++) {
-    if (!(field_ & (0b1 << (key_odd & 0b11111))))
-      return false;
-    key_odd += key2;
-  }
-  return true;
-}
-
 
 void NodeInfo::reset() {
   name = 0;
@@ -49,14 +18,20 @@ void NodeInfo::reset() {
 }
 
 bool NodeInfo::alive() const {
-  return getMillis() - heartbeat_millis < HEARTBEAT_TIMEOUT_MS;
+  return heartbeat_millis != 0 &&
+    getMillis() - heartbeat_millis < HEARTBEAT_TIMEOUT_MS;
 };
 
-Bus::Bus(uint8_t node_name) : self_name_(node_name) {}
+Bus::Bus(uint8_t node_name) : self_name_(node_name) {
+  memset(listenings_, 0xFF, LISTENING_MAX);
+  listening_all_ = false;
+  filter_bits_ = 0;
+}
 
 bool Bus::begin() {
   self_node_ = readEEPROM(NODE_ID_ADDR) % NODE_MAX;
   self_unique_ = getUnique();
+  memcpy(error_code_, "RST", 3);
 
   listen(TELEMETRY, ID_HEARTBEAT);
 
@@ -69,6 +44,61 @@ void Bus::update() {
   if (getMillis() - heartbeat_millis_ > 1000 / HEARTBEAT_FREQ) {
     sendHeartbeat();
     heartbeat_millis_ = getMillis();
+
+    sanity(0, connectedNodes() > 0);
+  }
+}
+
+void Bus::listenAll() {
+  listening_all_ = true;
+  filter_bits_ = 0xFF;
+  filterChanged();
+}
+
+bool Bus::listen(Packet::Kind kind, uint8_t id) {
+  uint8_t kind_id = (kind << 7) | id;
+  filter_bits_ |= 0b1 << (kind_id % 7);
+  for (int i = 0; i < LISTENING_MAX; i++) {
+    if (listenings_[i] == kind_id) return true;
+    if (listenings_[i] == 0xFF) {
+      listenings_[i] = kind_id;
+      filterChanged();
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Bus::listenShared(Packet::Kind kind, uint8_t id) {
+  uint8_t kind_id = (kind << 7) | id;
+  for (int i = LISTENING_MAX - 1; i >= 0; i--) {
+    if (listenings_[i] == kind_id)
+      return true;
+    if (listenings_[i] == 0xFF) {
+      listenings_[i] = kind_id;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Bus::isListening(uint8_t kind_id) const {
+  if (listening_all_) return true;
+  for (int i = 0; i < LISTENING_MAX; i++) {
+    if (listenings_[i] == 0xFF)
+      return false;
+    if (listenings_[i] == kind_id)
+      return true;
+  }
+  return false;
+}
+
+bool Bus::isListeningShared(uint8_t kind_id) const {
+  for (int i = LISTENING_MAX - 1; i >= 0; i--) {
+    if (listenings_[i] == 0xFF)
+      return false;
+    if (listenings_[i] == kind_id)
+      return true;
   }
 }
 
@@ -93,6 +123,20 @@ Packet &Bus::getErrorSummary() {
     }
   }
   return summary;
+}
+
+void Bus::printErrorSummary() {
+  Packet& summary = getErrorSummary();
+
+  for (Entry entry = summary.begin(); entry != summary.end(); ++entry) {
+#ifdef ARDUINO
+    Serial.printf("%c: %d (%.3s)\n",
+                  entry.type(), entry.as<uint8_t>(), entry.asBytes() + 1);
+#else
+    printf("%c: %d (%.3s)\n",
+           entry.type(),  entry.as<uint8_t>(), entry.asBytes() + 1);
+#endif
+  }
 }
 
 bool Bus::sanity(unsigned bit, bool isSane) {
@@ -126,6 +170,26 @@ Packet &Bus::getSanitySummary() {
   return summary;
 }
 
+void Bus::printSanitySummary() {
+  Packet &summary = getSanitySummary();
+
+  for (Entry entry = summary.begin(); entry != summary.end(); ++entry) {
+#ifdef ARDUINO
+    Serial.printf("%c: %x\n", entry.type(), entry.as<uint32_t>() >> 8);
+#else
+    printf("%c: %x\n", entry.type(), entry.as<uint32_t>() >> 8);
+#endif
+  }
+}
+
+unsigned Bus::connectedNodes() const {
+  unsigned count = 0;
+  for (unsigned n = 0; n < NODE_MAX; n++) {
+    if (nodes[n].alive() && n != self_node_) count++;
+  }
+  return count;
+}
+
 void Bus::sendHeartbeat() {
   uint8_t buf[BUF_SIZE(3)];
   Packet heartbeat(buf, sizeof(buf));
@@ -140,7 +204,7 @@ void Bus::sendHeartbeat() {
 void Bus::receivedPacket(const Packet &packet) {
   if (packet.id() == ID_HEARTBEAT) {
     uint32_t unique = packet.find('u').as<uint32_t>();
-    uint8_t name = packet.find('n').as<uint8_t>();
+    uint8_t  name = packet.find('n').as<uint8_t>();
     uint32_t sanity_bits = packet.find('s').as<uint32_t>();
 
     nodes[packet.node()].name = name;
@@ -158,7 +222,8 @@ void Bus::receivedPacket(const Packet &packet) {
         nodes[self_node_].reset();
       }
     }
-  } else {
+  }
+  else if (isListeningShared(packet.kind_id())) {
     shared_.update(packet);
   }
 }
@@ -182,23 +247,6 @@ bool Bus::receivedFrom(uint8_t node_id, uint8_t seq) {
     return false;
   }
 }
-
-// void Bus::sendTestPacket() {
-//   static unsigned n = 0;
-
-//   PacketN<32> test(TELEMETRY, 'z', unit_, TO_LOCAL, n);
-
-//   if (!availableForSend(test))
-//     return;
-
-//   for (unsigned i = 0; i < n; i++) {
-//     test.entries[i].set('I', self_unique_);
-//   }
-
-//   send(test);
-
-//   n = (n + 1) % 32;
-// }
 
 unsigned countBits(uint16_t v) {
   unsigned short count = (v & 0x5555) + ((v >> 1) & 0x5555);

@@ -19,8 +19,11 @@
 #define HEARTBEAT_TIMEOUT_MS 5000
 #endif
 
-#define NODE_MAX 16
-#define ENTRIES_MAX 32
+#ifndef LISTENING_MAX
+#define LISTENING_MAX 8
+#endif
+
+#define NODE_MAX 32
 
 #define ID_HEARTBEAT 0x7F
 #define ID_SANITY_SUMMARY '?'
@@ -30,50 +33,6 @@
 
 #define BUS_FILTER_WIDTH 64
 
-class BloomFilter32 {
-public:
-  BloomFilter32(uint8_t k);
-  void set(unsigned key);
-  void setAll();
-  void clearAll();
-
-  bool isSet(unsigned key) const;
-
-private:
-  uint8_t k_;
-  uint32_t field_;
-};
-
-// N must be 2^n
-template<unsigned N> class BitFilter {
-public:
-  BitFilter() {
-    for (unsigned i = 0; i < N / 8; i++) field_[i] = 0x00;
-  };
-
-  inline void set(unsigned key) {
-    field_[(key % N) >> 3] |= 0b1 << (key & 0b111);
-  }
-  void setAll() {
-    for (unsigned i = 0; i < N / 8; i++) {
-      field_[i] = 0xFF;
-    }
-  }
-  inline void clearAll() {
-    for (unsigned i = 0; i < N / 8; i++) field_[i] = 0x0;
-  }
-
-  bool isSet(unsigned key) const {
-    return field_[key % N >> 3] & (0b1 << (key & 0b111));
-  }
-
-  const uint8_t* getValue() const {
-    return field_;
-  }
-
-//private:
-  uint8_t field_[N/8];
-};
 
 struct NodeInfo {
   uint8_t name;
@@ -98,15 +57,9 @@ public:
   virtual void update();
 
   // Packet filter
-  virtual void listenAll() {
-    filter_.setAll();
-  }
-  virtual void unlistenAll() { filter_.clearAll();}
-  virtual void listen(Packet::Kind kind, uint8_t id) {
-    filter_.set((kind << 7) | id);
-  }
-  inline bool filter(uint8_t id) const {return filter_.isSet(id); }
-
+  void listenAll();
+  bool listen(Packet::Kind kind, uint8_t id);
+  // bool unlisten(Packet::Kind kind, uint8_t id) {}
 
   // Sending Packet
   virtual bool send(Packet &packet) = 0;
@@ -126,20 +79,23 @@ public:
     memcpy(error_code_, error_code, 3);
   };
   Packet& getErrorSummary();
+  void printErrorSummary();
 
-  // Sanity chevk
+  // Sanity check
   bool sanity(unsigned bit, bool isSane);
   bool sanity(unsigned bit) const;
   unsigned insanity() const;
   Packet& getSanitySummary();
+  void printSanitySummary();
+
+  unsigned connectedNodes() const;
 
   // Shared variables
   template <typename T>
-  Shared<T>& subscribe(Shared<T> &variable, uint8_t packet_id,
+  Shared<T>& subscribe(Shared<T> &variable, Packet::Kind kind, uint8_t packet_id,
                        uint8_t entry_type, uint8_t packet_from = 0xFF) {
-    shared_.add(variable, packet_id, entry_type, packet_from);
-    listen(TELEMETRY, variable.packetId());
-    listen(COMMAND, variable.packetId());
+    shared_.add(variable, (kind << 7) | packet_id, entry_type, packet_from);
+    listenShared(kind, variable.packetId());
     return variable;
   }
   void insert(Shared<uint32_t> &variable);
@@ -165,14 +121,22 @@ protected:
   uint8_t  error_code_[3];
   uint16_t sanity_bits_;
 
-  BitFilter<BUS_FILTER_WIDTH> filter_;
+  uint8_t listenings_[LISTENING_MAX];
+  bool listening_all_;
+  uint8_t filter_bits_;
 
   SharedVariables shared_;
+
+  virtual void filterChanged() {}
 
   void sendHeartbeat();
   void receivedPacket(const Packet &packet);
 
   bool receivedFrom(uint8_t node_id, uint8_t seq);
+
+  bool listenShared(Packet::Kind kind, uint8_t id);
+  bool isListening(uint8_t kind_id) const;
+  bool isListeningShared(uint8_t kind_id) const;
 };
 
 
