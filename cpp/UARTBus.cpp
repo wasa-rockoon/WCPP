@@ -4,7 +4,7 @@
 
 #include "Bus.hpp"
 #include "Packet.hpp"
-#include <PacketSerial.h>
+#include "COBS.hpp"
 
 UARTBus::UARTBus(uint8_t node_name, Stream &upper_serial, Stream &lower_serial)
     : Bus(node_name), upper_serial_(upper_serial),
@@ -118,7 +118,7 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
 
         another_serial.write(buf, count);
 
-        if (filter(kind_id)) {
+        if (isListening(kind_id)) {
           if (!queuePush(receive_queue_, decoded, len)) {
             error("BRD");
           }

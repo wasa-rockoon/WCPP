@@ -26,7 +26,6 @@
 
 #define BUF_SIZE(size) (PACKET_MIN_LEN + ENTRY_LEN_MAX * size)
 
-
 class float16 {
 public:
   float16(float value = 0.0f);
@@ -131,9 +130,9 @@ public:
   Packet &operator=(const Packet &another);
   bool copyTo(Packet& another) const;
 
-  inline uint8_t getCRC() const { return buf[len - 1]; }
-  inline uint8_t calcCRC() const { return crc_8(buf, len - 1); }
-  inline bool checkCRC() const { return getCRC() == calcCRC(); }
+  inline uint8_t getCRC()   const { return buf[len - 1]; }
+  inline uint8_t calcCRC()  const { return crc_8(buf, len - 1); }
+  inline bool    checkCRC() const { return getCRC() == calcCRC(); }
   inline uint8_t writeCRC() {
     buf[len - 1] = calcCRC();
     return getCRC();

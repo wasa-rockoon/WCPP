@@ -24,7 +24,7 @@ class Payload:
     @property
     def uint8(self) -> Optional[int]:
         if len(self.buf) < 1: return None
-        return struct.unpack('<B', self.buf)[0]
+        return struct.unpack('<B', self.buf[:1])[0]
     @property
     def uint16(self) -> Optional[int]:
         if len(self.buf) < 2: return None
@@ -57,8 +57,17 @@ class Entry:
         return 1 + len_
 
     def print(self):
-        print(' ', self.type, self.payload.int32, self.payload.float32,
-              self.payload.buf)
+        print(' ', self.type, self.payload.int32,
+              '{:.6E}'.format(self.payload.float32),
+              self.payload.buf
+              )
+
+    def printError(self):
+        print(' ', self.type, self.payload.uint8, self.payload.buf[1:])
+
+    def printSanity(self):
+        print(' ', self.type, self.payload.uint8, bin(self.payload.uint32 >> 8))
+
 
 class Kind(Enum):
     COMMAND = 0
@@ -105,8 +114,23 @@ class Packet:
 
         return packet
 
+    def find(self, entry_type: char, index: int = 0) -> Optional[Entry]:
+        i = 0
+        for entry in self.entries:
+            if entry.type == entry_type:
+                if i == index:
+                    return entry;
+                i += 1
+        return None
+
     def print(self):
         print(f"{self.kind} '{self.id}' {self.from_}.{self.node} -> {self.dest} [{self.size}] #{self.seq}")
         # print(self.kind, self.id, self.from_, self.dest, self.size, self.seq)
         for entry in self.entries:
-            entry.print()
+
+            if self.id == '!':
+                entry.printError()
+            elif self.id == '?':
+                entry.printSanity()
+            else:
+                entry.print()

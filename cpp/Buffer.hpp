@@ -123,7 +123,7 @@ public:
   iterator alloc(uint16_t size) {
     if (end_.ptr_ + size + sizeof(uint16_t) >= size_) {
       while (begin_.ptr_ > end_.ptr_) {
-        if (begin_.ptr_ != lock_at_) {
+        if ((int)begin_.ptr_ != lock_at_) {
           (*begin_).free();
           overflow_count_++;
         }
@@ -134,7 +134,7 @@ public:
     }
     while (end_.ptr_ < begin_.ptr_ &&
            begin_.ptr_ <= end_.ptr_ + size + sizeof(uint16_t)) {
-      if (begin_.ptr_ == lock_at_) {
+      if ((int)begin_.ptr_ == lock_at_) {
         begin_.step();
         end_.ptr_ = begin_.ptr_;
       }

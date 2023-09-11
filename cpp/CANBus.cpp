@@ -139,15 +139,34 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
       ++itr;
     }
     volatile uint8_t len = data[0];
-    ReceivedData &rd =
-      (*buf_.alloc(sizeof(ReceivedData) + len + packet_margin_)).value();
-    rd.kind_id = kind_id;
-    rd.from = from;
-    rd.frame_count = frame_count;
-    rd.frame_num = data[1];
-    rd.data[0] = kind_id;
-    rd.data[1] = from;
-    memcpy(rd.data + 2, data + 2, 6);
+
+    Packet packet(data, len, len);
+
+    if (len <= 8 && ((kind_id & 0x7F) == ID_HEARTBEAT ||
+        (!isListening(kind_id) && isListeningShared(kind_id)))) {
+      data[0] = kind_id;
+      data[1] = from;
+      Packet packet(data, len, len);
+      receivedFrom(packet.node(), packet.seq());
+      receivedPacket(packet);
+    }
+    else {
+      ReceivedData &rd =
+        (*buf_.alloc(sizeof(ReceivedData) + len + packet_margin_)).value();
+      rd.kind_id = kind_id;
+      rd.from = from;
+      rd.frame_count = frame_count;
+      rd.frame_num = data[1];
+      rd.data[0] = kind_id;
+      rd.data[1] = from;
+      memcpy(rd.data + 2, data + 2, 6);
+
+      if (len <= 8) {
+        Packet packet(rd.data, len + packet_margin_, len);
+        receivedFrom(packet.node(), packet.seq());
+        receivedPacket(packet);
+      }
+    }
   }
   else {
     SectionBuf<ReceivedData>::iterator itr = buf_.begin();
@@ -189,6 +208,6 @@ void CANBus::filterChanged() {
   CANSetFilter(id, mask);
 }
 
-uint8_t CANBus::id_field(uint8_t id) const {
-  return ~(0b1 << (id & 0b111));
+uint8_t CANBus::id_field(uint8_t kind_id) const {
+  return ~(0b1 << (kind_id % 7));
 }

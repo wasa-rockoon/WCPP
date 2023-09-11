@@ -214,6 +214,8 @@ export class Entry {
         if (f.format) return f.format(value)
         else if (f.datatype == 'float16') return value.toPrecision(3)
         else if (f.datatype == 'float32') return value.toPrecision(7)
+        else if (!Number.isInteger(value))
+            return String(parseFloat(value.toFixed(7)))
         else return String(value)
     }
 }

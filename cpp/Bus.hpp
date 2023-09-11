@@ -92,9 +92,12 @@ public:
 
   // Shared variables
   template <typename T>
-  Shared<T>& subscribe(Shared<T> &variable, Packet::Kind kind, uint8_t packet_id,
-                       uint8_t entry_type, uint8_t packet_from = 0xFF) {
-    shared_.add(variable, (kind << 7) | packet_id, entry_type, packet_from);
+  Shared<T> &subscribe(Shared<T> &variable, Packet::Kind kind,
+                       uint8_t packet_id, uint8_t entry_type, uint8_t index = 0,
+                       uint8_t packet_from = FROM_ALL,
+                       uint8_t node_name = FROM_ALL) {
+    shared_.add(variable, (kind << 7) | packet_id, entry_type, index, packet_from,
+                node_name);
     listenShared(kind, variable.packetId());
     return variable;
   }

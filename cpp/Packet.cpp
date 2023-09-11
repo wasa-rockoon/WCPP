@@ -75,25 +75,19 @@ Entry& Entry::append(uint8_t type, const uint8_t *bytes, unsigned size) {
     return *this;
 
   unsigned actual_size = size;
-  switch (size) {
-  case 4:
-    if (bytes[2] == 0x00 && bytes[2] == 0x00)
-      actual_size = 2;
-    else {
-      packet_->buf[ptr_ + 4] = bytes[3];
-      packet_->buf[ptr_ + 3] = bytes[2];
-    }
-  case 2:
-    if (bytes[1] == 0x00 && actual_size == 2)
-      actual_size = 1;
-    else
-      packet_->buf[ptr_ + 2] = bytes[1];
-  case 1:
-    if (bytes[0] == 0x00 && actual_size == 1)
-      actual_size = 0;
-    else
-      packet_->buf[ptr_ + 1] = bytes[0];
-  }
+
+  if (actual_size == 4 && bytes[2] == 0x00 && bytes[3] == 0x00)
+    actual_size = 2;
+  if (actual_size == 3 && bytes[2] == 0x00)
+    actual_size = 2;
+  if (actual_size == 2 && bytes[1] == 0x00)
+    actual_size = 1;
+  if (actual_size == 1 && bytes[0] == 0x00)
+    actual_size = 0;
+  if (actual_size == 3) actual_size = 4;
+
+  memcpy(packet_->buf + ptr_ + 1, bytes, actual_size);
+
   uint8_t sizes[] = {0b00, 0b01, 0b10, 0b00, 0b11};
   packet_->buf[ptr_] = ((type - 64) & 0b00111111) | (sizes[actual_size] << 6);
   ptr_ += 1 + this->size();
@@ -171,7 +165,7 @@ Packet::Packet(uint8_t *buf, unsigned buf_size, unsigned len)
     : buf(buf), buf_size(buf_size), len(len),
       end_(this, len, buf[2] & 0b11111) {};
 
-void Packet::set(Kind kind, uint8_t id, uint8_t from, uint8_t dest) {
+void Packet::set(Kind kind, uint8_t id, uint8_t dest, uint8_t from) {
   buf[0] = ((kind & 0b1) << 7) | (id & 0b1111111);
   buf[1] = ((from & 0b111) << 5) | (buf[1] & 0b11111);
   buf[2] = ((dest & 0b111) << 5) | (buf[2] & 0b11111);

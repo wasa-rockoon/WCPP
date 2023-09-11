@@ -11,7 +11,7 @@
 
 #define BUS_SERIAL_BAUD 115200
 
-#define BUS_DEBUG_SERIAL
+// #define BUS_DEBUG_SERIAL
 
 #ifndef SEND_QUEUE_SIZE
 #define SEND_QUEUE_SIZE 128

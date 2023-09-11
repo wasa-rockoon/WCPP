@@ -100,6 +100,7 @@ bool Bus::isListeningShared(uint8_t kind_id) const {
     if (listenings_[i] == kind_id)
       return true;
   }
+  return false;
 }
 
 Packet &Bus::getErrorSummary() {
@@ -175,7 +176,8 @@ void Bus::printSanitySummary() {
 
   for (Entry entry = summary.begin(); entry != summary.end(); ++entry) {
 #ifdef ARDUINO
-    Serial.printf("%c: %x\n", entry.type(), entry.as<uint32_t>() >> 8);
+    Serial.printf("%c: %x\n", entry.type(),
+                  (unsigned)(entry.as<uint32_t>() >> 8));
 #else
     printf("%c: %x\n", entry.type(), entry.as<uint32_t>() >> 8);
 #endif
@@ -191,25 +193,31 @@ unsigned Bus::connectedNodes() const {
 }
 
 void Bus::sendHeartbeat() {
-  uint8_t buf[BUF_SIZE(3)];
+  uint8_t buf[BUF_SIZE(5)];
   Packet heartbeat(buf, sizeof(buf));
   heartbeat.set(TELEMETRY, ID_HEARTBEAT, FROM_LOCAL, TO_LOCAL);
   heartbeat.begin()
     .append('u', self_unique_)
     .append('n', self_name_)
-    .append('s', sanity_bits_);
+    .append('s', sanity_bits_)
+    .append('e', error_count_)
+    .append('c', error_code_, 3);
   send(heartbeat);
 }
 
 void Bus::receivedPacket(const Packet &packet) {
   if (packet.id() == ID_HEARTBEAT) {
-    uint32_t unique = packet.find('u').as<uint32_t>();
-    uint8_t  name = packet.find('n').as<uint8_t>();
+    uint32_t unique      = packet.find('u').as<uint32_t>();
+    uint8_t  name        = packet.find('n').as<uint8_t>();
     uint32_t sanity_bits = packet.find('s').as<uint32_t>();
+    uint32_t error_count = packet.find('e').as<uint32_t>();
+    const uint8_t* error_code  = packet.find('c').asBytes();
 
     nodes[packet.node()].name = name;
     nodes[packet.node()].sanity_bits = sanity_bits;
     nodes[packet.node()].heartbeat_millis = getMillis();
+    nodes[packet.node()].error_count = error_count;
+    memcpy(nodes[packet.node()].error_code, error_code, 3);
 
     if (packet.node() == self_node_ && unique != self_unique_) {
       error("BCF");
@@ -224,7 +232,7 @@ void Bus::receivedPacket(const Packet &packet) {
     }
   }
   else if (isListeningShared(packet.kind_id())) {
-    shared_.update(packet);
+    shared_.update(packet, nodes[packet.node()].name);
   }
 }
 
