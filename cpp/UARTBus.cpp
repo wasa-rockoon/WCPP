@@ -30,7 +30,9 @@ bool UARTBus::begin() {
 void UARTBus::update() {
   checkSend();
 
+  // Serial.printf("<A>");
   checkSerial(upper_serial_, lower_serial_, upper_buf_, upper_count_);
+  // Serial.printf("<B>");
   checkSerial(lower_serial_, upper_serial_, lower_buf_, lower_count_);
 
   Bus::update();
@@ -81,6 +83,8 @@ void UARTBus::checkSerial(Stream &serial, Stream &another_serial, uint8_t* buf,
 
   while (serial.available() > 0) {
     uint8_t data = serial.read();
+
+    // Serial.printf("[%c]", data);
 
     buf[count] = data;
     count++;
@@ -166,7 +170,7 @@ bool UARTBus::queuePush(queue_t &queue, const uint8_t *data, unsigned len) {
 #if defined(ARDUINO_ARCH_RP2040)
     queue_add_blocking(&queue, buf);
 #elif defined(ESP32)
-    xQueueSend(queue, buf, 1000);
+    xQueueSend(queue, buf, 1);
 #endif
 
     n += 8;
@@ -185,17 +189,20 @@ unsigned UARTBus::queuePop(queue_t &queue, uint8_t *data) {
 #if defined(ARDUINO_ARCH_RP2040)
   queue_peek_blocking(&queue, buf);
 #elif defined(ESP32)
-  xQueuePeek(queue, buf, 1000);
+  xQueuePeek(queue, buf, 1);
 #endif
 
+
   unsigned len = buf[0];
+
+  // Serial.printf("%d %d \n", size, len);
 
   if (size < len) return 0;
 
 #if defined(ARDUINO_ARCH_RP2040)
   queue_remove_blocking(&queue, buf);
 #elif defined(ESP32)
-  xQueueReceive(queue, buf, 1000);
+  xQueueReceive(queue, buf, 1);
 #endif
 
   for (unsigned i = 0; i < 7; i++) {
@@ -203,15 +210,13 @@ unsigned UARTBus::queuePop(queue_t &queue, uint8_t *data) {
   }
 
   for (unsigned i = 7; i < len; i += 8) {
-#if defined(ARDUINO_ARCH_RP2040)
     if (data != nullptr) {
 #if defined(ARDUINO_ARCH_RP2040)
       queue_remove_blocking(&queue, data + i);
 #elif defined(ESP32)
-      xQueueReceive(queue, data + i, 1000);
+      xQueueReceive(queue, data + i, 1);
 #endif
     }
-#endif
   }
 
   return len;
@@ -219,9 +224,9 @@ unsigned UARTBus::queuePop(queue_t &queue, uint8_t *data) {
 
 inline unsigned UARTBus::queueSize(queue_t &queue) {
 #if defined(ARDUINO_ARCH_RP2040)
-  return queue_get_level(&queue) * 8;
+   return queue_get_level(&queue) * 8;
 #elif defined(ESP32)
-  return uxQueueMessagesWaiting(queue);
+   return uxQueueMessagesWaiting(queue) * 8;
 #endif
 }
 

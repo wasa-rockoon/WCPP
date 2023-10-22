@@ -82,9 +82,17 @@ bool CANBus::send(Packet &packet) {
 }
 
 const Packet CANBus::receive() {
+  disableInterrupts();
+  const Packet p = receive_();
+  enableInterrupts();
+  return p;
+}
+
+const Packet CANBus::receive_() {
   buf_.unlock();
   SectionBuf<ReceivedData>::iterator itr = buf_.begin();
-  if (itr == buf_.end()) return Packet();
+  if (itr == buf_.end())
+    return Packet();
 
   while (itr != buf_.end()) {
     ReceivedData &rd = (*itr).value();
@@ -105,8 +113,7 @@ const Packet CANBus::receive() {
         error("BCR");
         (*itr).free();
         last_received_ = Packet();
-      }
-      else {
+      } else {
         buf_.lock(itr);
       }
 
@@ -118,14 +125,22 @@ const Packet CANBus::receive() {
 }
 
 void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
-  if (!started_) return;
+  disableInterrupts();
+  received_(ext_id, data, dlc);
+  enableInterrupts();
+}
+
+void CANBus::received_(uint32_t ext_id, uint8_t * data, uint8_t dlc) {
+  if (!started_)
+    return;
 
   uint8_t kind_id = ext_id >> 21;
   uint8_t from = (ext_id >> 13) & 0xFF;
   volatile uint8_t frame_count = ext_id & 0b11111;
 
-  if (!isListening(kind_id) && !isListeningShared(kind_id)
-      && (kind_id & 0b01111111) != ID_HEARTBEAT) return;
+  if (!isListening(kind_id) && !isListeningShared(kind_id) &&
+      (kind_id & 0b01111111) != ID_HEARTBEAT)
+    return;
 
   if (frame_count == 0) {
     SectionBuf<ReceivedData>::iterator itr = buf_.begin();
@@ -136,21 +151,20 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
         buf_.pop();
         error("BDS");
       }
-      ++itr;
+      itr.step();
     }
     volatile uint8_t len = data[0];
 
     Packet packet(data, len, len);
 
     if (len <= 8 && ((kind_id & 0x7F) == ID_HEARTBEAT ||
-        (!isListening(kind_id) && isListeningShared(kind_id)))) {
+                     (!isListening(kind_id) && isListeningShared(kind_id)))) {
       data[0] = kind_id;
       data[1] = from;
       Packet packet(data, len, len);
       receivedFrom(packet.node(), packet.seq());
       receivedPacket(packet);
-    }
-    else {
+    } else {
       ReceivedData &rd =
         (*buf_.alloc(sizeof(ReceivedData) + len + packet_margin_)).value();
       rd.kind_id = kind_id;
@@ -159,7 +173,7 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
       rd.frame_num = data[1];
       rd.data[0] = kind_id;
       rd.data[1] = from;
-      memcpy(rd.data + 2, data + 2, 6);
+      memcpy(rd.data + 2, data + 2, std::min((int)len, 6));
 
       if (len <= 8) {
         Packet packet(rd.data, len + packet_margin_, len);
@@ -167,8 +181,7 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
         receivedPacket(packet);
       }
     }
-  }
-  else {
+  } else {
     SectionBuf<ReceivedData>::iterator itr = buf_.begin();
     while (itr != buf_.end()) {
       ReceivedData &rd = (*itr).value();
@@ -177,6 +190,13 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
           (*itr).free();
           buf_.pop();
           error("BDM");
+          break;
+        }
+        if (frame_count * 8 + dlc > (*itr).size() - sizeof(rd)) {
+          volatile unsigned s = (*itr).size() - sizeof(rd);
+          (*itr).free();
+          buf_.pop();
+          error("BDO");
           break;
         }
 
@@ -197,13 +217,13 @@ void CANBus::received(uint32_t ext_id, uint8_t *data, uint8_t dlc) {
 
         break;
       }
-      ++itr;
+      itr.step();
     }
   }
 }
 
 void CANBus::filterChanged() {
-  uint32_t id   = !filter_bits_ << 5;
+  uint32_t id = !filter_bits_ << 5;
   uint32_t mask = !filter_bits_ << 5;
   CANSetFilter(id, mask);
 }
@@ -211,3 +231,4 @@ void CANBus::filterChanged() {
 uint8_t CANBus::id_field(uint8_t kind_id) const {
   return ~(0b1 << (kind_id % 7));
 }
+

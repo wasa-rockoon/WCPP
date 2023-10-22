@@ -1,3 +1,4 @@
+import crc8 from 'crc/crc8';
 
 export type Char = string
 
@@ -208,7 +209,17 @@ export class Entry {
     }
 
     format(f: any): string {
+
         if (f.enum) return f.enum[this.payload.uint32] || this.payload.uint32
+        if (f.bits) {
+            return f.bits.map((b: any) => {
+                let mask = 0;
+                for (let i = 0; i < (b.width || 1); i++) mask |= (0b1 << i)
+                let value = (this.payload.uint32 >> (b.offset || 0)) & mask
+                if (b.enum) value = b.enum[value]
+                return { name: b.name, value: value }
+            })
+        }
         let value: number = (this.payload as any)[f.datatype]
         if (f.scale) value *= f.scale;
         if (f.format) return f.format(value)
@@ -334,6 +345,10 @@ export class Packet {
             i += entry.decode(entry_view, version)
             packet.entries.push(entry)
         }
+
+        const actual_crc8 = crc8(new Uint8Array(view.buffer, 0, i))
+        const read_crc8 = view.getUint8(i)
+        // console.log(i, view.byteLength, actual_crc8, read_crc8)
 
         return packet
     }

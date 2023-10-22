@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/wasa-rockoon/WCCP#readme",
   "dependencies": {
+    "crc": "^4.3.2",
     "typescript": "^5.1.6"
   }
 }

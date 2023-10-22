@@ -12,7 +12,7 @@
 #include <cstring>
 
 #ifndef HEARTBEAT_FREQ
-#define HEARTBEAT_FREQ 1
+#define HEARTBEAT_FREQ 4
 #endif
 
 #ifndef HEARTBEAT_TIMEOUT_MS
@@ -106,7 +106,7 @@ public:
   // void sendTestPacket();
 
 
-protected:
+// protected:
   uint8_t self_name_;
   uint8_t self_node_;
   uint8_t self_seq_;
@@ -148,3 +148,4 @@ extern unsigned getMillis();
 extern uint8_t readEEPROM(unsigned addr);
 extern void writeEEPROM(unsigned addr, uint8_t value);
 extern unsigned getUnique();
+

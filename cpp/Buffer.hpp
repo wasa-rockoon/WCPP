@@ -80,7 +80,13 @@ public:
     iterator(SectionBuf* buf, unsigned ptr): buf_(buf), ptr_(ptr) {};
 
     void step() {
-      ptr_ += (**this).size() + sizeof(uint16_t);
+      volatile unsigned s = (**this).size() + sizeof(uint16_t);
+      if (s >= buf_->size_) {
+        ptr_ = buf_->end_.ptr_;
+//        while (1);
+        return;
+      }
+      ptr_ += s;
       if (ptr_ >= buf_->size_) {
         ptr_ = 0;
       }

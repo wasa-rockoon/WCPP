@@ -21,6 +21,8 @@ def main():
 
     source = 'log'
 
+    read_size = 0
+
     with open(args.path, "rb") as f:
         while True:
 
@@ -31,10 +33,15 @@ def main():
             len_ = header[4]
             buf = f.read(len_)
 
-            if not millis or not len_ or not buf:
+            read_size += 5
+
+            if not millis or not len_ or not buf or len(buf) < 4:
+                print('format error')
                 break;
 
             packet = Packet.decode(buf)
+
+            read_size += len_
 
             if not packet:
                 print('decode error')
@@ -43,6 +50,8 @@ def main():
             if (not args.filter or args.filter.find(packet.id) != -1):
                 print(millis, 'ms:')
                 packet.print()
+                print(read_size, 'byte read')
+
 
 
 if __name__ == "__main__":

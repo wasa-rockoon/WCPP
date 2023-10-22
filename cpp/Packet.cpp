@@ -71,9 +71,6 @@ uint8_t Entry::size() const {
 
 
 Entry& Entry::append(uint8_t type, const uint8_t *bytes, unsigned size) {
-  if (ptr_ + 1 + size > packet_->buf_size - 1 || packet_->size() >= ENTRIES_MAX)
-    return *this;
-
   unsigned actual_size = size;
 
   if (actual_size == 4 && bytes[2] == 0x00 && bytes[3] == 0x00)
@@ -86,9 +83,12 @@ Entry& Entry::append(uint8_t type, const uint8_t *bytes, unsigned size) {
     actual_size = 0;
   if (actual_size == 3) actual_size = 4;
 
+  if (ptr_ + 1 + actual_size > packet_->buf_size - 1 || packet_->size() >= ENTRIES_MAX)
+    return *this;
+
   memcpy(packet_->buf + ptr_ + 1, bytes, actual_size);
 
-  uint8_t sizes[] = {0b00, 0b01, 0b10, 0b00, 0b11};
+  uint8_t sizes[] = {0b00, 0b01, 0b10, 0b11, 0b11};
   packet_->buf[ptr_] = ((type - 64) & 0b00111111) | (sizes[actual_size] << 6);
   ptr_ += 1 + this->size();
   count_++;
@@ -232,16 +232,17 @@ bool Packet::copyTo(Packet& another) const {
 
 void Packet::print() {
 #ifdef ARDUINO
-  Serial.printf("%c(%x) (%d %d -> %d) [%d] #%d\n",
-                id(), id(), from(), node(), dest(), size(), seq());
+  Serial.printf("%c(%x) (%d %d -> %d) [%d] #%d (%d)\n",
+                id(), id(), from(), node(), dest(), size(), seq(), len);
   for (Entry entry = begin(); entry != end(); ++entry) {
     Serial.printf("  ");
     entry.print();
     Serial.printf("\n");
   }
+  Serial.printf("[%d %d]\n", getCRC(), calcCRC());
 #else
-  printf("%c(%x) (%d %d -> %d) [%d] #%d\n",
-         id(), id(), from(), node(), dest(), size(), seq());
+  printf("%c(%x) (%d %d -> %d) [%d] #%d (%d)\n",
+         id(), id(), from(), node(), dest(), size(), seq(), len);
   for (Entry entry = begin(); entry != end(); ++entry) {
     printf("  ");
     entry.print();

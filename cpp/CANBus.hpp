@@ -19,6 +19,7 @@ public:
   bool send(Packet &packet) override;
 
   const Packet receive() override;
+  const Packet receive_();
 
   bool availableForSend(const Packet &packet) override { return true; };
 
@@ -45,6 +46,7 @@ private:
   uint8_t id_field(uint8_t id) const;
 
   void received(uint32_t ext_id, uint8_t* data, uint8_t dlc);
+  void received_(uint32_t ext_id, uint8_t *data, uint8_t dlc);
 
   friend void CANReceived(uint32_t ext_id, uint8_t* data, uint8_t len);
 };
@@ -53,3 +55,7 @@ bool CANInit();
 bool CANSend(uint32_t ext_id, uint8_t *buf, unsigned len);
 bool CANSetFilter(uint32_t id, uint32_t mask);
 void CANReceived(uint32_t ext_id, uint8_t *data, uint8_t len);
+
+extern void enableInterrupts();
+extern void disableInterrupts();
+
