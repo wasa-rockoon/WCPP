@@ -1,257 +1,295 @@
-#include "Packet.hpp"
+#include "float16.h"
+#include "packet.h"
 
-#include <algorithm>
+#include <cassert>
 #include <cstring>
 
-float16::float16(float value) {
-  uint32_t value32 = *reinterpret_cast<uint32_t *>(&value);
-  uint16_t value16;
-  volatile unsigned sign = value32 >> 31;
-  volatile unsigned exp = (value32 >> 23) & 0xFF;
-  volatile unsigned frac = value32 & 0x007FFFFF;
+namespace wccp {
 
-  if (exp == 0) {
-    if (frac == 0)
-      value16 = sign << 15; // +- Zero
-    else
-      value16 = (sign << 15) | (frac >> 13); // Denormalized values
-  } else if (exp == 0xFF) {
-    if (frac == 0)
-      value16 = (sign << 15) | 0x7C0; // +- Infinity
-    else
-      value16 = (sign << 15) | (0x1F << 20) | (frac >> 13); // (S/Q)NaN
-  }
-  // Normalized values
-  else {
-    value16 = (sign << 15) |
-              (std::min(std::max((int)exp - 127 + 15, 0), 31) << 10) |
-              (frac >> 13);
-  }
-  raw_ = value16;
-}
+Entry EntriesIterator::operator*() const { return Entry(entries_, ptr_); }
 
-float float16::toFloat32() const {
-  uint16_t value16 = raw_;
-  uint32_t value32;
-  unsigned sign = value16 >> 15;
-  unsigned exp = (value16 >> 10) & 0x1F;
-  unsigned frac = value16 & 0x03FF;
-  if (exp == 0) {
-    if (frac == 0)
-      value32 = sign << 31; // +- Zero
-    else
-      value32 = (sign << 31) | (frac << 13); // Denormalized values
-  } else if (exp == 0x1F) {
-    if (frac == 0)
-      value32 = (sign << 31) | 0x7F800000; // +- Infinity
-    else
-      value32 = (sign << 31) | (0xFF << 23) | (frac << 13); // (S/Q)NaN
-  }
-  // Normalized values
-  else
-    value32 = (sign << 31) | ((exp - 15 + 127) << 23) | (frac << 13);
-
-  return *reinterpret_cast<float *>(&value32);
-}
-
-Entry::Entry(const Entry &entry)
-    : packet_(entry.packet_), ptr_(entry.ptr_), count_(entry.count_) {};
-
-Entry::Entry(Packet* packet, unsigned ptr, uint8_t count)
-    : packet_(packet), ptr_(ptr), count_(count){};
-
-
-uint8_t Entry::type() const {
-  return (packet_->buf[ptr_] & 0b00111111) + 64;
-};
-uint8_t Entry::size() const {
-  uint8_t sizes[] = {0, 1, 2, 4};
-  return sizes[packet_->buf[ptr_] >> 6];
-};
-
-
-Entry& Entry::append(uint8_t type, const uint8_t *bytes, unsigned size) {
-  unsigned actual_size = size;
-
-  if (actual_size == 4 && bytes[2] == 0x00 && bytes[3] == 0x00)
-    actual_size = 2;
-  if (actual_size == 3 && bytes[2] == 0x00)
-    actual_size = 2;
-  if (actual_size == 2 && bytes[1] == 0x00)
-    actual_size = 1;
-  if (actual_size == 1 && bytes[0] == 0x00)
-    actual_size = 0;
-  if (actual_size == 3) actual_size = 4;
-
-  if (ptr_ + 1 + actual_size > packet_->buf_size - 1 || packet_->size() >= ENTRIES_MAX)
-    return *this;
-
-  memcpy(packet_->buf + ptr_ + 1, bytes, actual_size);
-
-  uint8_t sizes[] = {0b00, 0b01, 0b10, 0b11, 0b11};
-  packet_->buf[ptr_] = ((type - 64) & 0b00111111) | (sizes[actual_size] << 6);
-  ptr_ += 1 + this->size();
-  count_++;
-  packet_->len += 1 + actual_size;
-  packet_->setEnd(*this);
-  packet_->setSize(packet_->size() + 1);
+EntriesIterator &EntriesIterator::operator++() {
+  // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
+  if (ptr_ + (**this).size() + entry_type_size < entries_.size())
+    ptr_ += (**this).size() + entry_type_size;
+  else ptr_ = entries_.size();
   return *this;
 }
 
-Entry Entry::next() const {
-  if (ptr_ + 1 + size() < packet_->len - 1 && count_ + 1 < packet_->size()) {
-    return Entry(packet_, ptr_ + 1 + (unsigned)size(), count_ + 1);
-  }
-  else return packet_->end_;
+Entry Entries::append(const char name[2]) {
+  Entry last(*this, size());
+  last.name() = name;
+  resize(size(), 2);
+  return last;
 }
-uint8_t* Entry::operator*() { return packet_->buf + ptr_ + 1; }
-Entry& Entry::operator++() {
-  if (ptr_ + 1 + size() < packet_->len - 1 && count_ + 1 < packet_->size()) {
-    ptr_ += 1 + (unsigned)size();
-    count_++;
-  } else
-    *this = packet_->end_;
+
+Packet& Packet::command(uint8_t packet_id, uint8_t component_id,
+                        uint8_t unit_id) {
+  buf_[0] = header_size();
+  buf_[1] = packet_id & 0b01111111;
+  buf_[2] = component_id;
+  buf_[3] = unit_id;
   return *this;
-}
-Entry Entry::operator++(int) {
-  Entry result = *this;
-  ++(*this);
-  return result;
-}
-
-
-Entry& Entry::operator=(const Entry &another) {
-  packet_ = another.packet_;
-  ptr_    = another.ptr_;
-  count_  = another.count_;
-  return *this;
-}
-
-void Entry::print() const {
-#ifdef ARDUINO
-  Serial.printf("%c: %d %f", type(), as<int32_t>(), as<float>());
-#else
-  printf("%c: %d", type(), as<int32_t>());
-#endif
-}
-
-const uint8_t *Entry::decode(uint8_t *bytes) const {
-  bytes[0] = bytes[1] = bytes[2] = bytes[3] = 0;
-  switch (size()) {
-  case 4:
-    bytes[3] = packet_->buf[ptr_ + 4];
-    bytes[2] = packet_->buf[ptr_ + 3];
-  case 2:
-    bytes[1] = packet_->buf[ptr_ + 2];
-  case 1:
-    bytes[0] = packet_->buf[ptr_ + 1];
-  }
-  return bytes;
-}
-
-Packet::Packet() : buf(nullptr), buf_size(0), len(PACKET_MIN_LEN),
-                   end_(this, PACKET_HEADER_LEN, 0) {};
-
-Packet::Packet(const Packet& packet)
-  : buf(packet.buf), buf_size(packet.buf_size), len(packet.len),
-    end_(packet.end_) {}
-
-Packet::Packet(uint8_t *buf, unsigned buf_size)
-    : buf(buf), buf_size(buf_size), len(PACKET_MIN_LEN),
-      end_(this, PACKET_HEADER_LEN, 0) {
-  if (buf != nullptr) memset(buf, 0, PACKET_HEADER_LEN);
-};
-Packet::Packet(uint8_t *buf, unsigned buf_size, unsigned len)
-    : buf(buf), buf_size(buf_size), len(len),
-      end_(this, len, buf[2] & 0b11111) {};
-
-void Packet::set(Kind kind, uint8_t id, uint8_t dest, uint8_t from) {
-  buf[0] = ((kind & 0b1) << 7) | (id & 0b1111111);
-  buf[1] = ((from & 0b111) << 5) | (buf[1] & 0b11111);
-  buf[2] = ((dest & 0b111) << 5) | (buf[2] & 0b11111);
-}
-
-void Packet::setNode(uint8_t node) {
-  buf[1] = (buf[1] & 0b11100000) | (node & 0b11111);
-}
-void Packet::setSeq(uint8_t seq) {
-  buf[3] = seq;
-}
-void Packet::setSize(uint8_t n) {
-  buf[2] = (buf[2] & 0b11100000) | (n & 0b11111);
-}
-void Packet::setFrom(uint8_t from) {
-  buf[1] = ((from & 0b111) << 5) | (buf[1] & 0b11111);
-}
-
-
-void Packet::clear() {
-  len = PACKET_MIN_LEN;
-  setSize(0);
-  end_ = begin();
 };
 
-Entry Packet::find(uint8_t type, uint8_t index) {
-  uint8_t i = 0;
-  for (Entry entry = begin(); entry != end(); ++entry) {
-    if (entry.type() == type) {
-      if (i == index) return entry;
-      i++;
-    }
-  }
-  return end();
-}
-
-const Entry Packet::find(uint8_t type, uint8_t index) const {
-  uint8_t i = 0;
-  for (Entry entry = begin(); entry != end(); ++entry) {
-    if (entry.type() == type) {
-      if (i == index)
-        return entry;
-      i++;
-    }
-  }
-  return end();
-}
-
-Packet& Packet::operator=(const Packet &another) {
-  buf = another.buf;
-  len = another.len;
-  buf_size = another.buf_size;
-  end_ = another.end_;
+Packet& Packet::telemetry(uint8_t packet_id, uint8_t component_id,
+                        uint8_t unit_id) {
+  buf_[0] = header_size();
+  buf_[1] = packet_id | 0b10000000;
+  buf_[2] = component_id;
+  buf_[3] = unit_id;
   return *this;
-}
+};
 
-bool Packet::copyTo(Packet& another) const {
-  if (len > another.buf_size) return false;
-  another.len = len;
-  memcpy(another.buf, buf, len);
-  another.end_ = Entry(&another, end_.ptr_, end_.count_);
+bool Packet::resize(uint8_t ptr, uint8_t size_from_ptr) {
+  if (ptr + size_from_ptr >= buf_size_) return false;
+  buf_[0] = ptr + size_from_ptr;
   return true;
 }
 
-void Packet::print() {
-#ifdef ARDUINO
-  Serial.printf("%c(%x) (%d %d -> %d) [%d] #%d (%d)\n",
-                id(), id(), from(), node(), dest(), size(), seq(), len);
-  for (Entry entry = begin(); entry != end(); ++entry) {
-    Serial.printf("  ");
-    entry.print();
-    Serial.printf("\n");
-  }
-  Serial.printf("[%d %d]\n", getCRC(), calcCRC());
-#else
-  printf("%c(%x) (%d %d -> %d) [%d] #%d (%d)\n",
-         id(), id(), from(), node(), dest(), size(), seq(), len);
-  for (Entry entry = begin(); entry != end(); ++entry) {
-    printf("  ");
-    entry.print();
-    printf("\n");
-  }
-#endif
+bool SubEntries::resize(uint8_t ptr, uint8_t size_from_ptr) {
+  if (ptr + size_from_ptr >= buf_size_)
+    return false;
+  buf_[0] = ptr + size_from_ptr;
+  parent_.resize(ptr_, buf_[0]);
+  return true;
 }
 
-void Packet::setEnd(Entry &entry) {
-  end_ = entry;
-  setSize(entry.count_ - 1);
+Entry::Name &Entry::Name::operator=(const char name[2]) {
+  buf_[0] = (buf_[0] & 0b11100000) | (name[0] & 0b00011111);
+  buf_[1] = (buf_[1] & 0b11100000) | (name[1] & 0b00011111);
+  return *this;
 }
+bool Entry::Name::operator==(const char name[2]) {
+  return (buf_[0] & 0b00011111) == (name[0] & 0b00011111) &&
+         (buf_[1] & 0b00011111) == (name[1] & 0b00011111);
+}
+
+uint8_t Entry::size() const {
+  uint8_t type = getType();
+  if (type == 0b000000 || type == 0b000100 || type & 0b100000)
+    return 0; // null, 0.0f, short int
+  if ((type & 0b010000) == 0b010000)
+    return (type & 0b000111) + 1; // int
+  if (type >= 0b000101 && type <= 0b000111)
+    return 1 << (type & 0b000011); // float
+  if (type >= 0b000001 && type <= 0b000011)
+    return entries_.buf_[ptr_ + entry_type_size]; // struct, packet, bytes
+  if ((type & 0b111000) == 0b001000)
+    return type & 0b000111; // short bytes
+
+  assert(false);
+}
+
+void Entry::setType(uint8_t type) {
+  entries_.buf_[ptr_ + 0] =
+    (entries_.buf_[ptr_ + 0] & 0b00011111) | ((type & 0b000111) << 5);
+  entries_.buf_[ptr_ + 1] =
+    (entries_.buf_[ptr_ + 1] & 0b00011111) | ((type & 0b111000) << 2);
+}
+
+uint8_t Entry::getType() const {
+  return (entries_.buf_[ptr_ + 0] >> 5) |
+         ((entries_.buf_[ptr_ + 1] & 0b11100000) >> 2);
+}
+
+int64_t Entry::getSignedInt() const {
+  if (matchType(0b010000, 0b110000)) {
+    bool is_negative = getType() & 0b001000;
+    if (is_negative)
+      return - getPayload<uint64_t>((getType() & 0b000111) + 1);
+    else
+      return getPayload<uint64_t>((getType() & 0b000111) + 1);
+  }
+  if (matchType(0b100000, 0b100000))
+    return getType() & 0b011111;
+
+  return 0;
+}
+
+uint64_t Entry::getUnsignedInt() const {
+  if (matchType(0b010000, 0b110000)) {
+    bool is_negative = getType() & 0b001000;
+    if (is_negative)
+      return (uint64_t)-getPayload<uint64_t>((getType() & 0b000111) + 1);
+    else
+      return getPayload<uint64_t>((getType() & 0b000111) + 1);
+  }
+  if (matchType(0b100000, 0b100000))
+    return getType() & 0b011111;
+
+  return 0;
+}
+
+float16 Entry::getFloat16() const {
+  if (matchType(0b000100, 0b111111))
+    return float16();
+  if (isFloat16())
+    return float16(getPayload<uint16_t>(2));
+  if (isFloat32())
+    return float16(getPayload<float>(4));
+  if (isFloat64())
+    return float16((float)getPayload<double>(8));
+  if (isInt())
+    return float16((float)getSignedInt());
+
+  return float16();
+}
+float Entry::getFloat32() const {
+  if (matchType(0b000100, 0b111111))
+    return 0.0f;
+  if (isFloat16())
+    return (float)float16(getPayload<uint16_t>(2));
+  if (isFloat32())
+    return getPayload<float>(4);
+  if (isFloat64())
+    return (float)getPayload<double>(8);
+  if (isInt())
+    return (float)getSignedInt();
+
+  return 0.0f;
+}
+double Entry::getFloat64() const {
+  if (matchType(0b000100, 0b111111))
+    return 0.0;
+  if (isFloat16())
+    return (double)float16(getPayload<uint16_t>(2));
+  if (isFloat32())
+    return (double)getPayload<float>(4);
+  if (isFloat64())
+    return getPayload<double>(8);
+  if (isInt())
+    return (double)getSignedInt();
+
+  return 0.0;
+}
+
+uint8_t Entry::getBytes(uint8_t *bytes) const {
+  if (matchType(0b000011)) {
+    uint8_t len = getPayload<uint8_t>(1);
+    std::memcpy(bytes, getPayloadBuf() + 1, len);
+    return len;
+  }
+  if (matchType (0b001000, 0b111000)) {
+    uint8_t len = getType() & 0b000111;
+    std::memcpy(bytes, getPayloadBuf(), len);
+    return len;
+  }
+  return 0;
+}
+
+uint8_t Entry::getString(char *str) const {
+  uint8_t len = getBytes(reinterpret_cast<uint8_t*>(str));
+  str[len] = '\0';
+  return len;
+}
+
+Packet Entry::getPacket() {
+  if (isPacket()) return Packet::decode(getPayloadBuf());
+  else            return Packet::null();
+}
+
+SubEntries Entry::getSubEntries() {
+  return SubEntries(entries_, ptr_, getPayloadBuf(), getPayload<uint8_t>(1));
+}
+
+bool Entry::setNull() {
+  if (!setSize(0))
+    return false;
+  setType(0b000000);
+  return true;
+}
+
+bool Entry::setInt(const uint8_t *bytes, uint8_t size, bool is_negative) {
+  if (size == 0) {
+    if (!setSize(0)) return false;
+    setType(0b100000);
+  }
+  else if (size == 1 && !is_negative && bytes[0] < 32) {
+    if (!setSize(0)) return false;
+    setType(0b100000 | bytes[0]);
+  }
+  else {
+    if (!setSize(size)) return false;
+    if (is_negative) setType(0b011000 | (size - 1));
+    else             setType(0b010000 | (size - 1));
+    setPayload(bytes, size);
+  }
+  return true;
+}
+
+bool Entry::setFloat16(float value) {
+  if (value == 0.0f) {
+    if (!setSize(0))
+      return false;
+    setType(0b000100);
+  } else {
+    if (!setSize(2))
+      return false;
+    setType(0b000101);
+    float16 value16(value);
+    uint16_t raw = value16.getRaw();
+
+    setPayload(raw, 2);
+  }
+  return true;
+}
+
+bool Entry::setFloat32(float value) {
+  if (value == 0.0f) {
+    if (!setSize(0))
+      return false;
+    setType(0b000100);
+  }
+  else {
+    if (!setSize(4))
+      return false;
+    setType(0b000110);
+    setPayload(value, 4);
+  }
+  return true;
+}
+
+bool Entry::setFloat64(double value) {
+  if (sizeof(double) != 8)
+    return setFloat32(value);
+
+  if (value == 0.0f) {
+    if (!setSize(0))
+      return false;
+    setType(0b000100);
+  } else {
+    if (!setSize(8))
+      return false;
+    setType(0b000111);
+    setPayload(value, 8);
+  }
+  return true;
+}
+
+bool Entry::setBytes(const uint8_t *bytes, uint8_t length) {
+  if (length <= 7) {
+    if (!setSize(length))
+      return false;
+    setType(0b001000 | length);
+    setPayload(bytes, length);
+  }
+  else {
+    if (!setSize(length + 1))
+      return false;
+    setType(0b000011);
+    setPayload(length, 1);
+    setPayload(bytes, length, 1);
+  }
+  return true;
+}
+
+bool Entry::setString(const char *str) {
+  return setBytes(reinterpret_cast<const uint8_t*>(str), std::strlen(str));
+}
+
+bool Entry::setSize(uint8_t size) {
+  return entries_.resize(ptr_, entry_type_size + size);
+}
+
+} // namespace wccp

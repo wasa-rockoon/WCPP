@@ -3,4 +3,7 @@
 __pycache__
 *.egg-info
 
+build/
+*.out
+
 .DS_Store
