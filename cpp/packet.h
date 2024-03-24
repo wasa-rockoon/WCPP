@@ -8,7 +8,6 @@
 
 #include "checksum.h"
 #include "float16.h"
-#include <concepts>
 #include <cstring>
 #include <stdio.h>
 
@@ -21,8 +20,10 @@ class EntriesIterator;
 class Entry;
 
 constexpr uint8_t entry_type_size = 2;
-constexpr uint8_t unit_id_local = 0;
-constexpr uint8_t component_id_self = 0;
+constexpr uint8_t unit_id_local = 0x00;
+constexpr uint8_t component_id_self = 0x00;
+constexpr uint8_t packet_type_mask = 0b10000000;
+constexpr uint8_t packet_id_mask = 0b01111111;
 
 class EntriesIterator {
 public:
@@ -48,8 +49,8 @@ public:
   inline iterator begin() { return iterator(*this, header_size()); }
   inline iterator end() { return iterator(*this, size()); }
 
-  inline virtual uint8_t size() const = 0;
-  inline virtual uint8_t header_size() const = 0;
+  virtual uint8_t size() const = 0;
+  virtual uint8_t header_size() const = 0;
   Entry append(const char name[2]);
 
 protected:
@@ -76,26 +77,31 @@ public:
   template <uint8_t N>
   static Packet empty(uint8_t buf[N]) { return Packet(buf, N); }
 
-  Packet& command(uint8_t packet_id, uint8_t component_id,
-                  uint8_t unit_id = unit_id_local);
-  Packet& telemetry(uint8_t packet_id, uint8_t component_id = component_id_self,
-                    uint8_t unit_id = unit_id_local);
+  Packet &command(uint8_t packet_id, uint8_t component_id = component_id_self);
+  Packet &command(uint8_t packet_id, uint8_t component_id,
+                  uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t squence = 0);
+  Packet &telemetry(uint8_t packet_id, uint8_t component_id = component_id_self);
+  Packet &telemetry(uint8_t packet_id, uint8_t component_id,
+                    uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t squence = 0);
 
-  inline uint8_t size() const override {
-    if (isNull())
-      return 0;
-    return buf_[0];
-  }
-  inline uint8_t header_size() const override { return 4; }
+  inline uint8_t size() const override { return isNull() ? 0 : buf_[0]; }
+  inline uint8_t header_size() const override { return isLocal() ? 4 : 7; }
 
   inline bool isNull()      const { return buf_ == nullptr; }
-  inline bool isCommand()   const { return !(buf_[1] & 0b10000000); }
-  inline bool isTelemetry() const { return !!(buf_[1] & 0b10000000); }
+  inline bool isCommand()   const { return  !(buf_[1] & packet_type_mask); }
+  inline bool isTelemetry() const { return !!(buf_[1] & packet_type_mask); }
+  inline bool isLocal()     const { return buf_[3] == unit_id_local; }
+  inline bool isRemote()    const { return buf_[3] != unit_id_local; }
 
-  inline uint8_t packet_id()    const { return buf_[1] & 0b01111111; }
-  inline uint8_t component_id() const { return buf_[2]; }
-  inline uint8_t unit_id()      const { return buf_[3]; }
-  inline uint8_t checksum()     const { return buf_[size()]; }
+  inline uint8_t packet_id()      const { return buf_[1] & packet_id_mask; }
+  inline uint8_t type_and_id()    const { return buf_[1]; }
+  inline uint8_t component_id()   const { return buf_[2]; }
+  inline uint8_t origin_unit_id() const { return isRemote() ? buf_[3] : unit_id_local; }
+  inline uint8_t dest_unit_id()   const { return isRemote() ? buf_[4] : unit_id_local; }
+  inline uint16_t sequence()      const { return isRemote() ? *(uint16_t*)(buf_ + 5) : 0; }
+  inline uint8_t checksum()       const { return buf_[size()]; }
+
+  bool copyPayload(const Packet& from);
 
 private:
 
@@ -175,7 +181,7 @@ public:
 
 
   bool setNull();
-  template<std::integral T> bool setInt(T value) {
+  template<typename T> bool setInt(T value) {
     uint8_t size = 0;
     bool is_negative = value < 0;
     if (is_negative) value = - value;

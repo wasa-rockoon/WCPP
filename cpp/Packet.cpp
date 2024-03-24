@@ -23,23 +23,55 @@ Entry Entries::append(const char name[2]) {
   return last;
 }
 
-Packet& Packet::command(uint8_t packet_id, uint8_t component_id,
-                        uint8_t unit_id) {
-  buf_[0] = header_size();
-  buf_[1] = packet_id & 0b01111111;
+Packet &Packet::command(uint8_t packet_id, uint8_t component_id) {
+  buf_[1] = packet_id & ~(packet_type_mask);
   buf_[2] = component_id;
-  buf_[3] = unit_id;
+  buf_[3] = unit_id_local;
+  buf_[0] = header_size();
   return *this;
 };
 
-Packet& Packet::telemetry(uint8_t packet_id, uint8_t component_id,
-                        uint8_t unit_id) {
-  buf_[0] = header_size();
-  buf_[1] = packet_id | 0b10000000;
+Packet &Packet::command(uint8_t packet_id, uint8_t component_id,
+                        uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t sequence) {
+  buf_[1] = packet_id & ~(packet_type_mask);
   buf_[2] = component_id;
-  buf_[3] = unit_id;
+  buf_[3] = origin_unit_id;
+  buf_[4] = dest_unit_id;
+  buf_[5] = sequence & 0xFF;
+  buf_[6] = sequence >> 8;
+  buf_[0] = header_size();
   return *this;
 };
+
+Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id) {
+  buf_[1] = packet_id | packet_type_mask;
+  buf_[2] = component_id;
+  buf_[3] = unit_id_local;
+  buf_[0] = header_size();
+  return *this;
+};
+
+Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id,
+                          uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t sequence) {
+  buf_[1] = packet_id | packet_type_mask;
+  buf_[2] = component_id;
+  buf_[3] = origin_unit_id;
+  buf_[4] = dest_unit_id;
+  buf_[5] = sequence & 0xFF;
+  buf_[6] = sequence >> 8;
+  buf_[0] = header_size();
+  return *this;
+};
+
+bool Packet::copyPayload(const Packet &from) {
+  if (buf_size_ - header_size() < from.size() - from.header_size()) return false;
+
+  buf_[0] = header_size() + from.size() - from.header_size();
+
+  std::memcpy(buf_ + header_size(), from.buf_ + header_size(),
+              from.size() - from.header_size());
+  return true;
+}
 
 bool Packet::resize(uint8_t ptr, uint8_t size_from_ptr) {
   if (ptr + size_from_ptr >= buf_size_) return false;
