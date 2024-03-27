@@ -11,7 +11,7 @@
 #include <cstring>
 #include <stdio.h>
 
-namespace wccp {
+namespace wcpp {
 
 class Entries;
 class SubEntries;
@@ -19,11 +19,13 @@ class Packet;
 class EntriesIterator;
 class Entry;
 
-constexpr uint8_t entry_type_size = 2;
-constexpr uint8_t unit_id_local = 0x00;
+constexpr unsigned size_max = 255;
+
+constexpr uint8_t entry_type_size   = 2;
+constexpr uint8_t unit_id_local     = 0x00;
 constexpr uint8_t component_id_self = 0x00;
-constexpr uint8_t packet_type_mask = 0b10000000;
-constexpr uint8_t packet_id_mask = 0b01111111;
+constexpr uint8_t packet_type_mask  = 0b10000000;
+constexpr uint8_t packet_id_mask    = 0b01111111;
 
 class EntriesIterator {
 public:
@@ -41,16 +43,39 @@ private:
   friend Entries;
 };
 
+class EntriesConstIterator {
+public:
+  const Entry operator*() const;
+  EntriesConstIterator &operator++();
+  bool operator==(const EntriesConstIterator &i) const { return ptr_ == i.ptr_; }
+  bool operator!=(const EntriesConstIterator &i) const { return ptr_ != i.ptr_; }
+
+private:
+  const Entries &entries_;
+  uint8_t ptr_;
+
+  EntriesConstIterator(const Entries& entries, uint8_t ptr): entries_(entries), ptr_(ptr) {}
+
+  friend Entries;
+};
+
 
 class Entries {
 public:
   using iterator = EntriesIterator;
+  using const_iterator = EntriesConstIterator;
 
   inline iterator begin() { return iterator(*this, header_size()); }
+  inline const_iterator begin() const { return const_iterator(*this, header_size()); }
   inline iterator end() { return iterator(*this, size()); }
+  inline const_iterator end() const { return const_iterator(*this, size()); }
 
   virtual uint8_t size() const = 0;
   virtual uint8_t header_size() const = 0;
+
+  inline const uint8_t* getBuf() const { return buf_; }
+  inline uint8_t* getBuf() { return buf_; }
+
   Entry append(const char name[2]);
 
 protected:
@@ -70,13 +95,23 @@ private:
 
 class Packet: public Entries {
 public:
-  using iterator = EntriesIterator;
+  using ref_change_t = void (*)(Packet&, int);
 
+  // Constructors
   static Packet null() { return Packet(); }
-  static Packet decode(uint8_t* buf) { return Packet(buf); }
-  template <uint8_t N>
-  static Packet empty(uint8_t buf[N]) { return Packet(buf, N); }
+  static Packet empty(uint8_t* buf, uint8_t N, ref_change_t ref_change = nullptr) { 
+    return Packet(buf, N, ref_change); 
+  }
+  static const Packet decode(uint8_t* buf, ref_change_t ref_change = nullptr) { 
+    return Packet(buf, ref_change); 
+  }
 
+  inline Packet(const Packet& packet): Packet(packet.buf_, packet.buf_size_, packet.ref_change_) {
+    if (ref_change_ != nullptr) (*ref_change_)(*this, +1);
+  }
+  inline Packet(Packet&& packet): Packet(packet.buf_, packet.buf_size_, packet.ref_change_) {}
+
+  // Setting header
   Packet &command(uint8_t packet_id, uint8_t component_id = component_id_self);
   Packet &command(uint8_t packet_id, uint8_t component_id,
                   uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t squence = 0);
@@ -84,6 +119,7 @@ public:
   Packet &telemetry(uint8_t packet_id, uint8_t component_id,
                     uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t squence = 0);
 
+  // Get info
   inline uint8_t size() const override { return isNull() ? 0 : buf_[0]; }
   inline uint8_t header_size() const override { return isLocal() ? 4 : 7; }
 
@@ -93,6 +129,9 @@ public:
   inline bool isLocal()     const { return buf_[3] == unit_id_local; }
   inline bool isRemote()    const { return buf_[3] != unit_id_local; }
 
+  inline operator bool() const { return !isNull(); }
+  bool operator!() const { return isNull(); }
+
   inline uint8_t packet_id()      const { return buf_[1] & packet_id_mask; }
   inline uint8_t type_and_id()    const { return buf_[1]; }
   inline uint8_t component_id()   const { return buf_[2]; }
@@ -101,13 +140,25 @@ public:
   inline uint16_t sequence()      const { return isRemote() ? *(uint16_t*)(buf_ + 5) : 0; }
   inline uint8_t checksum()       const { return buf_[size()]; }
 
+
+  Packet& operator=(const Packet& packet);
+  Packet& operator=(Packet&& packet);
+
   bool copyPayload(const Packet& from);
+  bool copy(const Packet& from);
+
+
+  inline ~Packet() { if (ref_change_ != nullptr) ref_change_(*this, -1); }
 
 private:
+  ref_change_t ref_change_;
 
-  Packet() {}
-  Packet(uint8_t* buf) : Entries(buf, buf[0]) {}
-  Packet(uint8_t* buf, uint8_t buf_size): Entries(buf, buf_size) {}
+  inline Packet() {}
+  inline Packet(uint8_t* buf, ref_change_t ref_change = nullptr): Packet(buf, buf[0], ref_change) {}
+
+  inline Packet(uint8_t* buf, uint8_t buf_size, ref_change_t ref_change = nullptr)
+  : Entries(buf, buf_size), ref_change_(ref_change) {}
+
 
   bool resize(uint8_t ptr, uint8_t size_from_ptr) override;
 

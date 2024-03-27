@@ -1,6 +1,7 @@
 #include "float16.h"
 #include "packet.h"
-#include "heap.h"
+
+#ifndef ARDUINO
 
 #include <cassert>
 #include <cstring>
@@ -12,7 +13,7 @@ TEST(PacketTest, BasicAssertions) {
   uint8_t buf[255];
   memset(buf, 0, 255);
 
-  wccp::Packet p = wccp::Packet::empty<255>(buf);
+  wcpp::Packet p = wcpp::Packet::empty(buf, 255);
 
   for (int i = 0; i < 4; i++) {
     switch (i) {
@@ -118,4 +119,5 @@ TEST(PacketTest, BasicAssertions) {
   }
 }
 
+#endif
 

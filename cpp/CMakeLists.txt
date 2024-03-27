@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(my_project)
+project(wcpp)
 
 # GoogleTest requires at least C++14
 set(CMAKE_CXX_STANDARD 20)
@@ -17,14 +17,14 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-add_library(wccp STATIC packet.cpp float16.cpp heap.cpp)
+add_library(wcpp STATIC packet.cpp float16.cpp heap.cpp)
 add_executable(
   test_packet
   test_packet.cpp
 )
 target_link_libraries(
   test_packet
-  wccp
+  wcpp
   GTest::gtest_main
 )
 

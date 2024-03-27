@@ -4,11 +4,19 @@
 #include <cassert>
 #include <cstring>
 
-namespace wccp {
+namespace wcpp {
 
 Entry EntriesIterator::operator*() const { return Entry(entries_, ptr_); }
 
 EntriesIterator &EntriesIterator::operator++() {
+  // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
+  if (ptr_ + (**this).size() + entry_type_size < entries_.size())
+    ptr_ += (**this).size() + entry_type_size;
+  else ptr_ = entries_.size();
+  return *this;
+}
+
+EntriesConstIterator &EntriesConstIterator::operator++() {
   // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
   if (ptr_ + (**this).size() + entry_type_size < entries_.size())
     ptr_ += (**this).size() + entry_type_size;
@@ -63,13 +71,34 @@ Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id,
   return *this;
 };
 
-bool Packet::copyPayload(const Packet &from) {
+Packet& Packet::operator=(const Packet& packet) {
+  buf_ = packet.buf_;
+  buf_size_ = packet.buf_size_;
+  ref_change_ = packet.ref_change_;
+  if (ref_change_ != nullptr) ref_change_(*this, +1);
+  return *this;
+}
+
+Packet& Packet::operator=(Packet&& packet) {
+  buf_ = packet.buf_;
+  buf_size_ = packet.buf_size_;
+  ref_change_ = packet.ref_change_;
+  return *this;
+}
+
+bool Packet::copyPayload(const Packet& from) {
   if (buf_size_ - header_size() < from.size() - from.header_size()) return false;
 
   buf_[0] = header_size() + from.size() - from.header_size();
-
   std::memcpy(buf_ + header_size(), from.buf_ + header_size(),
               from.size() - from.header_size());
+  return true;
+}
+
+bool Packet::copy(const Packet& from) {
+  if (buf_size_ < from.size()) return false;
+
+  std::memcpy(buf_, from.buf_, from.size() + 1);
   return true;
 }
 

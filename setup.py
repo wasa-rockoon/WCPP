@@ -1,9 +1,9 @@
 from setuptools import setup
 
 setup(
-    name="wccp",
+    name="wcpp",
     version="1.0.0",
     install_requires=[],
-    packages=['wccp'],
-    package_dir={'wccp': 'python'}
+    packages=['wcpp'],
+    package_dir={'wcpp': 'python'}
 )

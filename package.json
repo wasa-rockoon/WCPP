@@ -1,7 +1,7 @@
 {
-  "name": "wccp",
+  "name": "wcpp",
   "version": "0.1.0",
-  "description": "WASA Common Command&Telemetry Protocol",
+  "description": "WASA Common Packet Protocol",
   "main": "dist/typescript/index.js",
   "types": "dist/typescript/index.d.ts",
   "typings": "dist/typescript/index.d.ts",
