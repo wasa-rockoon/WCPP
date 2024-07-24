@@ -6,7 +6,114 @@
 
 namespace wcpp {
 
-Entry EntriesIterator::operator*() const { return Entry(entries_, ptr_); }
+bool Entry::setNull() {
+  if (!setSize(0))
+    return false;
+  setType(0b000000);
+  return true;
+}
+
+bool Entry::setInt(const uint8_t *bytes, uint8_t size, bool is_negative) {
+  if (size == 0) {
+    if (!setSize(0)) return false;
+    setType(0b100000);
+  }
+  else if (size == 1 && !is_negative && bytes[0] < 32) {
+    if (!setSize(0)) return false;
+    setType(0b100000 | bytes[0]);
+  }
+  else {
+    if (!setSize(size)) return false;
+    if (is_negative) setType(0b011000 | (size - 1));
+    else             setType(0b010000 | (size - 1));
+    setPayload(bytes, size);
+  }
+  return true;
+}
+
+bool Entry::setFloat16(float value) {
+  if (value == 0.0f) {
+    if (!setSize(0))
+      return false;
+    setType(0b000100);
+  } else {
+    if (!setSize(2))
+      return false;
+    setType(0b000101);
+    float16 value16(value);
+    uint16_t raw = value16.getRaw();
+
+    setPayload(raw, 2);
+  }
+  return true;
+}
+
+bool Entry::setFloat32(float value) {
+  if (value == 0.0f) {
+    if (!setSize(0))
+      return false;
+    setType(0b000100);
+  }
+  else {
+    if (!setSize(4))
+      return false;
+    setType(0b000110);
+    setPayload(value, 4);
+  }
+  return true;
+}
+
+bool Entry::setFloat64(double value) {
+  if (sizeof(double) != 8)
+    return setFloat32(value);
+
+  if (value == 0.0f) {
+    if (!setSize(0))
+      return false;
+    setType(0b000100);
+  } else {
+    if (!setSize(8))
+      return false;
+    setType(0b000111);
+    setPayload(value, 8);
+  }
+  return true;
+}
+
+bool Entry::setBytes(const uint8_t *bytes, uint8_t length) {
+  if (length <= 7) {
+    if (!setSize(length))
+      return false;
+    setType(0b001000 | length);
+    setPayload(bytes, length);
+  }
+  else {
+    if (!setSize(length + 1))
+      return false;
+    setType(0b000011);
+    setPayload(length, 1);
+    setPayload(bytes, length, 1);
+  }
+  return true;
+}
+
+bool Entry::setString(const char *str) {
+  return setBytes(reinterpret_cast<const uint8_t*>(str), std::strlen(str));
+}
+
+bool Entry::setSize(uint8_t size) {
+  return entries_.resize(ptr_, entry_type_size + size);
+}
+
+const uint8_t* Entry::getPayloadBuf() const {
+  return entries_.buf_ + ptr_ + entry_type_size;
+}
+uint8_t* Entry::getPayloadBuf() {
+  return entries_.buf_ + ptr_ + entry_type_size;
+}
+
+
+
 
 EntriesIterator &EntriesIterator::operator++() {
   // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
@@ -22,6 +129,27 @@ EntriesConstIterator &EntriesConstIterator::operator++() {
     ptr_ += (**this).size() + entry_type_size;
   else ptr_ = entries_.size();
   return *this;
+}
+
+
+EntriesIterator& EntriesIterator::find(const char name[2]) {
+  while (*this != entries_.end() && (**this).name() == name) ++(*this);
+  return *this;
+}
+
+EntriesConstIterator& EntriesConstIterator::find(const char name[2]) {
+  while (*this != entries_.end() && (**this).name() == name) ++(*this);
+  return *this;
+}
+
+Entries::iterator Entries::find(const char name[2]) {
+  iterator itr = begin();
+  return itr.find(name);
+}
+
+Entries::const_iterator Entries::find(const char name[2]) const {
+  const_iterator itr = begin();
+  return itr.find(name);
 }
 
 Entry Entries::append(const char name[2]) {
@@ -121,9 +249,19 @@ Entry::Name &Entry::Name::operator=(const char name[2]) {
   buf_[1] = (buf_[1] & 0b11100000) | (name[1] & 0b00011111);
   return *this;
 }
+
 bool Entry::Name::operator==(const char name[2]) {
   return (buf_[0] & 0b00011111) == (name[0] & 0b00011111) &&
          (buf_[1] & 0b00011111) == (name[1] & 0b00011111);
+}
+
+bool Entry::Name::operator==(Name name) {
+  return *this == name.buf_;
+}
+
+
+Entry::Name Entry::name() const {
+  return Name(entries_.buf_ + ptr_); 
 }
 
 uint8_t Entry::size() const {
@@ -254,103 +392,5 @@ SubEntries Entry::getSubEntries() {
   return SubEntries(entries_, ptr_, getPayloadBuf(), getPayload<uint8_t>(1));
 }
 
-bool Entry::setNull() {
-  if (!setSize(0))
-    return false;
-  setType(0b000000);
-  return true;
-}
-
-bool Entry::setInt(const uint8_t *bytes, uint8_t size, bool is_negative) {
-  if (size == 0) {
-    if (!setSize(0)) return false;
-    setType(0b100000);
-  }
-  else if (size == 1 && !is_negative && bytes[0] < 32) {
-    if (!setSize(0)) return false;
-    setType(0b100000 | bytes[0]);
-  }
-  else {
-    if (!setSize(size)) return false;
-    if (is_negative) setType(0b011000 | (size - 1));
-    else             setType(0b010000 | (size - 1));
-    setPayload(bytes, size);
-  }
-  return true;
-}
-
-bool Entry::setFloat16(float value) {
-  if (value == 0.0f) {
-    if (!setSize(0))
-      return false;
-    setType(0b000100);
-  } else {
-    if (!setSize(2))
-      return false;
-    setType(0b000101);
-    float16 value16(value);
-    uint16_t raw = value16.getRaw();
-
-    setPayload(raw, 2);
-  }
-  return true;
-}
-
-bool Entry::setFloat32(float value) {
-  if (value == 0.0f) {
-    if (!setSize(0))
-      return false;
-    setType(0b000100);
-  }
-  else {
-    if (!setSize(4))
-      return false;
-    setType(0b000110);
-    setPayload(value, 4);
-  }
-  return true;
-}
-
-bool Entry::setFloat64(double value) {
-  if (sizeof(double) != 8)
-    return setFloat32(value);
-
-  if (value == 0.0f) {
-    if (!setSize(0))
-      return false;
-    setType(0b000100);
-  } else {
-    if (!setSize(8))
-      return false;
-    setType(0b000111);
-    setPayload(value, 8);
-  }
-  return true;
-}
-
-bool Entry::setBytes(const uint8_t *bytes, uint8_t length) {
-  if (length <= 7) {
-    if (!setSize(length))
-      return false;
-    setType(0b001000 | length);
-    setPayload(bytes, length);
-  }
-  else {
-    if (!setSize(length + 1))
-      return false;
-    setType(0b000011);
-    setPayload(length, 1);
-    setPayload(bytes, length, 1);
-  }
-  return true;
-}
-
-bool Entry::setString(const char *str) {
-  return setBytes(reinterpret_cast<const uint8_t*>(str), std::strlen(str));
-}
-
-bool Entry::setSize(uint8_t size) {
-  return entries_.resize(ptr_, entry_type_size + size);
-}
 
 } // namespace wccp
