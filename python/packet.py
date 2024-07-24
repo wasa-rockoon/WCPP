@@ -1,136 +1,371 @@
 import struct
-from enum import Enum
+from enum import IntEnum
 from typing import List, Optional
-
-char = str
-
-class Payload:
-
-    def __init__(self):
-        self.buf = b'\x00\x00\x00\x00'
-
-    @property
-    def int8(self) -> Optional[int]:
-        if len(self.buf) < 1: return None
-        return struct.unpack('<b', self.buf)[0]
-    @property
-    def int16(self) -> Optional[int]:
-        if len(self.buf) < 2: return None
-        return struct.unpack('<h', self.buf)[0]
-    @property
-    def int32(self) -> Optional[int]:
-        if len(self.buf) < 4: return None
-        return struct.unpack('<i', self.buf)[0]
-    @property
-    def uint8(self) -> Optional[int]:
-        if len(self.buf) < 1: return None
-        return struct.unpack('<B', self.buf[:1])[0]
-    @property
-    def uint16(self) -> Optional[int]:
-        if len(self.buf) < 2: return None
-        return struct.unpack('<H', self.buf)[0]
-    @property
-    def uint32(self) -> Optional[int]:
-        if len(self.buf) < 4: return None
-        return struct.unpack('<I', self.buf)[0]
-    @property
-    def float16(self) -> Optional[float]:
-        if len(self.buf) < 2: return None
-        return struct.unpack('<e', self.buf)[0]
-    @property
-    def float32(self) -> Optional[float]:
-        if len(self.buf) < 4: return None
-        return struct.unpack('<f', self.buf)[0]
-
+from crc import Calculator, Crc8
 
 class Entry:
-    def __init__(self, type, payload):
-        self.type = type
-        self.payload = payload
 
+    def __init__(self):
+        self.name = '@@'
+        self.type_ = 0b000000 
+        self.size = 0
+        self.payload = bytes()
+
+    def is_null(self) -> bool:
+        return self.match_type(0b000000)
+    def is_int(self) -> bool:
+        return self.match_type(0b010000, 0b110000) or self.match_type(0b100000, 0b100000)
+    def is_float(self) -> bool:
+        return self.match_type(0b000100, 0b111100)
+    def is_float16(self) -> bool:
+        return self.match_type(0b000101)
+    def is_float32(self) -> bool:
+        return self.match_type(0b000110)
+    def is_float64(self) -> bool:
+        return self.match_type(0b000111)
+    def is_bytes(self) -> bool:
+        return self.match_type(0b000011) or self.match_type(0b001000, 0b111000)
+    def is_packet(self) -> bool:
+        return self.match_type(0b000010)
+    def is_struct(self) -> bool:
+        return self.match_type(0b000001)
+
+    def bool(self) -> bool: 
+        return bool(self.int())
+
+    def int(self) -> int: 
+        if self.match_type(0b010000, 0b110000):
+            is_negative = self.type_ & 0b001000
+            buf = bytearray(8)
+            buf[0:self.size] = self.payload
+            value = struct.unpack('<Q', buf)[0]
+            if is_negative:
+                return - value
+            else:
+                return value
+        if self.match_type(0b100000, 0b100000):
+            return self.type_ & 0b011111
+
+        return 0
+
+    def float(self) -> float:
+        if self.match_type(0b000100, 0b111111):
+            return 0.0
+        if self.is_float16():
+            return struct.unpack('<e', self.payload)[0]
+        if self.is_float32():
+            return struct.unpack('<f', self.payload)[0]
+        if self.is_float64():
+            return struct.unpack('<d', self.payload)[0]
+        if self.is_int():
+            return float(self.int())
+
+        return 0.0
+
+    def bytes(self) -> bytes:
+        if self.match_type(0b000011):
+            return self.payload[1:]
+        if self.match_type(0b001000, 0b111000):
+            return self.payload
+        return bytes()
+
+    def string(self) -> str:
+        return self.bytes().decode()
+
+    def packet(self) -> Optional['Packet']:
+        if self.is_packet():
+            return Packet.decode(self.payload[0:self.size])
+
+    def sub_entries(self) -> [Entry]:
+        if not self.is_struct():
+            return []
+        entries = []
+        i = 0
+        while i < self.size:
+            entry = Entry()
+            i += entry.decode(self.payload[1+i:])
+            entries.append(entry)
+
+        return entries
+
+    def set_null(self):
+        self.type_ = 0b000000
+        self.size = 0
+        self.payload = bytes()
+
+    def set_bool(self, value: bool):
+        self.setInt(int(value))
+
+    def set_int(self, value: int):
+        value = int(value)
+        if value >= 0 and value < 32:
+            self.type_ = 0b100000 | value
+            self.size = 0
+            self.payload = bytes()
+        else:
+            self.payload = struct.pack('<Q', abs(value))
+            self.size = 8
+            while self.size > 0:
+                if self.payload[self.size-1] == 0:
+                    self.size -= 1
+                else:
+                    break
+            self.payload = self.payload[:self.size]
+            if value > 0:
+                self.type_ = 0b010000 | (self.size - 1)
+            else:
+                self.type_ = 0b011000 | (self.size - 1)
+
+    def set_float16(self, value: float):
+        if value == 0.0:
+            self.type_ = 0b000100
+            self.size = 0
+            self.payload = bytes()
+        else:
+            self.type_ = 0b000101
+            self.size = 2
+            self.payload = struct.pack('<e', value)
+
+    def set_float32(self, value: float):
+        if value == 0.0:
+            self.type_ = 0b000100
+            self.size = 0
+            self.payload = bytes()
+        else:
+            self.type_ = 0b000110
+            self.size = 4
+            self.payload = struct.pack('<f', value)
+
+    def set_float64(self, value: float):
+        if value == 0.0:
+            self.type_ = 0b000100
+            self.size = 0
+            self.payload = bytes()
+        else:
+            self.type_ = 0b000111
+            self.size = 8
+            self.payload = struct.pack('<d', value)
+ 
+    def set_bytes(self, data: bytes):
+        if len(data) <= 7:
+            self.type_ = 0b001000 | len(data)
+            self.size = len(data)
+            self.payload = data[:]
+        else:
+            self.type_ = 0b000011
+            self.size = 1 + len(data)
+            self.payload = bytes([len(data)]) + data[:]
+
+    def set_string(self, data: str):
+        return self.set_bytes(data.encode())
+
+    
     def decode(self, buf: bytes) -> int:
-        self.type = chr((buf[0] & 0b00111111) + 64)
-        len_code = (buf[0] & 0b11000000) >> 6
-        len_ = [0, 1, 2, 4][len_code]
-        self.payload.buf = buf[1:1+len_] + b'\x00' * (4 - len_)
+        self.type_ = (buf[0] >> 5) | ((buf[1] & 0b11100000) >> 2)
 
-        return 1 + len_
+        self.name = chr((buf[0] & 0b00011111) + 64) + chr((buf[1] & 0b00011111) + 96)
 
-    def print(self):
-        print(' ', self.type, self.payload.int32,
-              '{:.6E}'.format(self.payload.float32),
-              self.payload.buf
-              )
+        if self.type_ == 0b000000 or self.type_ == 0b000100 or self.type_ & 0b100000:
+            self.size = 0; # null, 0.0f, short int
+        if (self.type_ & 0b010000) == 0b010000:
+            self.size = (self.type_ & 0b000111) + 1; # int
+        if self.type_ >= 0b000101 and self.type_ <= 0b000111:
+            self.size = 1 << (self.type_ & 0b000011); # float
+        if self.type_ >= 0b000001 and self.type_ <= 0b000011:
+            self.size = 1 + buf[2]; # struct, packet, bytes
+        if (self.type_ & 0b111000) == 0b001000:
+            self.size = self.type_ & 0b000111; # short bytes
 
-    def printError(self):
-        print(' ', self.type, self.payload.uint8, self.payload.buf[1:])
+        self.payload = buf[2:2+self.size]
 
-    def printSanity(self):
-        print(' ', self.type, self.payload.uint8, bin(self.payload.uint32 >> 8))
+        return 2 + self.size
+
+    def encode(self) -> bytes:
+        buf = bytearray(2 + len(self.payload))
+        buf[0] = ((self.type_ & 0b000111) << 5) | (ord(self.name[0].upper()) - 64)
+        buf[1] = ((self.type_ & 0b111000) << 2) | (ord(self.name[1].upper()) - 64)
+        buf[2:] = self.payload
+        return buf
+
+    def match_type(self, value, mask = 0b111111):
+        return (self.type_ & mask) == value
 
 
-class Kind(Enum):
+    def print(self, indent: str = ''):
+        payload_str = ''
+        type_str = ''
+        if self.is_null():
+            payload_str = 'null'
+            type_str = 'null   '
+        elif self.is_int():
+            payload_str = str(self.int())
+            type_str = 'int    '
+        elif self.is_float16():
+            type_str = 'float16'
+            payload_str = str(self.float())
+        elif self.is_float32():
+            type_str = 'float32'
+            payload_str = str(self.float())
+        elif self.is_float64():
+            type_str = 'float64'
+            payload_str = str(self.float())
+        elif self.is_bytes():
+            type_str = 'bytes  '
+            payload_str = repr(self.string())
+        elif self.is_packet():
+            type_str = 'packet '
+        elif self.is_struct():
+            type_str = 'struct '
+
+        print(indent + self.name + ': ' + type_str + ' = ' + payload_str)
+
+        if self.is_packet():
+            self.packet().print(indent + '  ')
+        elif self.is_struct():
+            for entry in self.sub_entries():
+                entry.print(indent + '  ')
+
+
+class PacketType(IntEnum):
     COMMAND = 0
     TELEMETRY = 1
 
     def __str__(self) -> str:
-        if self == Kind.COMMAND:
+        if self == PacketType.COMMAND:
             return 'cmd'
         else:
             return 'tlm'
 
 class Packet:
 
-    def __init__(self, kind: Kind, id: char, from_: int, dest: int,
-                 size: int, node: int = 0, seq: int = 0):
-        self.id = id
-        self.kind = kind
-        self.from_ = from_
-        self.node = node
-        self.size = size
-        self.dest = dest
-        self.seq = seq
-        self.entries: List[Entry] = list(map(lambda _: Entry(None, Payload()),
-                                             [None] * size))
+    size_max = 255
+    entry_type_size   = 2
+    unit_id_local     = 0x00
+    component_id_self = 0x00
+    packet_type_mask  = 0b10000000
+    packet_id_mask    = 0b01111111
 
-    @staticmethod
-    def decode(buf: bytes) -> Optional['Packet']:
-        kind = Kind(buf[0] >> 7)
-        id = chr(buf[0] & 0b01111111)
-        from_ = buf[1] >> 5
-        node = buf[1] & 0b11111
-        dest = buf[2] >> 5;
-        size = buf[2] & 0b11111;
-        seq  = buf[3];
+    def __init__(self):
+        self.size           = 0
+        self.type_          = PacketType.COMMAND
+        self.packet_id      = 0
+        self.component_id   = 0
+        self.origin_unit_id = 0
+        self.dest_unit_id   = 0
+        self.sequence       = 0
+        self.entries: List[Entry] = []
 
-        packet = Packet(kind, id, from_, dest, size, node, seq)
+        self.buf = None
 
-        i = 4
+    def is_command(self) -> bool:
+        return self.type_ == PacketType.COMMAND
+    def is_telemetry(self) -> bool:
+        return self.type_ == PacketType.TELEMETRY
+    def is_local(self) -> bool:
+        return self.origin_unit_id == self.unit_id_local
+    def is_remote(self) -> bool:
+        return self.origin_unit_id != self.unit_id_local
 
-        for n in range(0, size):
-            if i >= len(buf):
-                return None
-            i += packet.entries[n].decode(buf[i:])
+    def checksum(self) -> int:
+        if self.buf is None:
+            return Calculator(Crc8.CCITT).checksum(self.encode())
+        else:
+            return Calculator(Crc8.CCITT).checksum(self.buf)
+
+    def append(self, name: str) -> Entry:
+        entry = Entry()
+        entry.name = name
+        self.entries.append(entry)
+        return entry
+
+    def resize(self):
+        pass
+
+    def find(self, name: str) -> Optional[Entry]:
+        for entry in self.entries:
+            if entry.name.lower() == name.lower():
+                return entry
+        return None
+
+    def print(self, indent: str = ''):
+        if self.is_local():
+            print(f'{indent}{self.type_}[{self.size}] {hex(self.packet_id)} by {hex(self.component_id)}, local')
+        else:
+            print(f'{indent}{self.type_}[{self.size}] {hex(self.packet_id)} by {hex(self.component_id)}'
+                + f', remote (from {hex(self.origin_unit_id)} to {hex(self.dest_unit_id)}), #{self.sequence}')
+
+        for entry in self.entries:
+            entry.print(indent + '  ')
+
+    def encode(self) -> bytes:
+        buf = bytearray(255)
+        buf[1] = (int(self.type_) * self.packet_type_mask) | (self.packet_id & self.packet_id_mask)
+        buf[2] = self.component_id
+        buf[3] = self.origin_unit_id
+        if self.is_remote():
+            buf[4] = self.dest_unit_id
+            buf[5:7] = struct.pack('<H', self.sequence)
+            i = 7
+        else:
+            i = 4
+        for entry in self.entries:
+            entry_buf = entry.encode()
+            buf[i:i+len(entry_buf)] = entry_buf
+            i += len(entry_buf)
+
+        buf[0] = i
+
+        return bytes(buf[:i])
+
+
+    @classmethod
+    def command(cls, packet_id: int = 0, component_id: int = 0, origin_unit_id: int = 0, 
+                dest_unit_id: int = 0, sequence: int = 0) -> 'Packet':
+        packet = cls()
+        packet.type_          = PacketType.COMMAND
+        packet.packet_id      = packet_id
+        packet.component_id   = component_id
+        packet.origin_unit_id = origin_unit_id
+        packet.dest_unit_id   = dest_unit_id
+        packet.sequence       = sequence
+        return packet
+
+    @classmethod
+    def telemetry(cls, packet_id: int = 0, component_id: int = 0, origin_unit_id: int = 0, 
+                dest_unit_id: int = 0, sequence: int = 0) -> 'Packet':
+        packet = cls()
+        packet.type_ = PacketType.TELEMETRY
+        packet.packet_id      = packet_id
+        packet.component_id   = component_id
+        packet.origin_unit_id = origin_unit_id
+        packet.dest_unit_id   = dest_unit_id
+        packet.sequence       = sequence
+        return packet
+
+    @classmethod
+    def decode(cls, buf: bytes) -> Optional['Packet']:
+        if buf[0] > len(buf):
+            return None
+
+        packet = cls()
+        
+        packet.size           = buf[0]
+        packet.type_          = PacketType((buf[1] & cls.packet_type_mask) >> 7)
+        packet.packet_id      = buf[1] & cls.packet_id_mask
+        packet.component_id   = buf[2]
+        packet.origin_unit_id = buf[3]
+        packet.dest_unit_id   = buf[4] if packet.is_remote() else cls.unit_id_local
+        packet.sequence       = struct.unpack('<H', buf[5:7])[0] if packet.is_remote() else 0
+
+        packet.buf = buf[:packet.size]
+
+        i = 7 if packet.is_remote() else 4
+        
+        while i < packet.size:
+            entry = Entry()
+            i += entry.decode(buf[i:])
+            packet.entries.append(entry)
 
         return packet
 
-    def find(self, entry_type: char, index: int = 0) -> Optional[Entry]:
-        i = 0
-        for entry in self.entries:
-            if entry.type == entry_type:
-                if i == index:
-                    return entry;
-                i += 1
-        return None
 
-    def print(self):
-        print(f"{self.kind} '{self.id}' {self.from_}.{self.node} -> {self.dest} [{self.size}] #{self.seq}")
-        # print(self.kind, self.id, self.from_, self.dest, self.size, self.seq)
-        for entry in self.entries:
-
-            if self.id == '!':
-                entry.printError()
-            elif self.id == '?':
-                entry.printSanity()
-            else:
-                entry.print()
