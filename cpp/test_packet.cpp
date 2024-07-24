@@ -7,6 +7,7 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <iostream>
+#include <fstream>
 
 TEST(PacketTest, BasicAssertions) {
 
@@ -14,6 +15,10 @@ TEST(PacketTest, BasicAssertions) {
   memset(buf, 0, 255);
 
   wcpp::Packet p = wcpp::Packet::empty(buf, 255);
+
+  std::ofstream fout;
+  fout.open("sample.bin", std::ios::out|std::ios::binary|std::ios::trunc);
+  EXPECT_TRUE(fout);
 
   for (int i = 0; i < 4; i++) {
     switch (i) {
@@ -35,7 +40,7 @@ TEST(PacketTest, BasicAssertions) {
     p.append("Ix").setInt(1);
     p.append("Iy").setInt(1234567890);
     p.append("Iz").setInt(-1234567890);
-    p.append("Fx").setFloat16(1.23);
+    p.append("Fx").setFloat16(1.25);
     p.append("Fy").setFloat32(4.56);
     p.append("Fz").setFloat64(7.89);
     p.append("Bx").setBytes((const uint8_t*)"ABC", 3);
@@ -44,6 +49,9 @@ TEST(PacketTest, BasicAssertions) {
     for (int i = 0; i < p.size(); i++)
       printf("%02X ", buf[i]);
     printf("\n");
+
+    fout.write(reinterpret_cast<const char *>(p.encode()), p.size());
+    fout << '\0';
 
     switch (i) {
     case 0:
@@ -97,7 +105,7 @@ TEST(PacketTest, BasicAssertions) {
     EXPECT_EQ((*e).getInt(), -1234567890);
     ++e;
     EXPECT_TRUE((*e).name() == "Fx");
-    EXPECT_EQ((*e).getFloat16(), float16(1.23f));
+    EXPECT_EQ((*e).getFloat16(), float16(1.25f));
     ++e;
     EXPECT_TRUE((*e).name() == "Fy");
     EXPECT_FLOAT_EQ((*e).getFloat32(), 4.56);
@@ -117,6 +125,8 @@ TEST(PacketTest, BasicAssertions) {
     EXPECT_EQ((*e).getString(str), 11);
     EXPECT_STREQ(str, "abcdefghijk");
   }
+
+  fout.close();
 }
 
 #endif

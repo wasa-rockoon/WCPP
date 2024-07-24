@@ -273,11 +273,10 @@ uint8_t Entry::size() const {
   if (type >= 0b000101 && type <= 0b000111)
     return 1 << (type & 0b000011); // float
   if (type >= 0b000001 && type <= 0b000011)
-    return entries_.buf_[ptr_ + entry_type_size]; // struct, packet, bytes
+    return 1 + entries_.buf_[ptr_ + entry_type_size]; // struct, packet, bytes
   if ((type & 0b111000) == 0b001000)
     return type & 0b000111; // short bytes
 
-  assert(false);
 }
 
 void Entry::setType(uint8_t type) {

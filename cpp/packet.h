@@ -60,7 +60,7 @@ public:
     return matchType(0b000011) || matchType(0b001000, 0b111000);
   }
   inline bool isPacket() const { return matchType(0b000010); }
-  inline bool isStruct() const { return matchType(0b000011); }
+  inline bool isStruct() const { return matchType(0b000001); }
 
 
   inline bool getBool() const { return getSignedInt(); }
