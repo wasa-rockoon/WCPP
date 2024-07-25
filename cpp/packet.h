@@ -37,6 +37,8 @@ public:
     bool operator==(const char name[2]);
     bool operator==(Name name);
 
+    char operator[](int i) const; 
+
   private:
     Name(uint8_t* buf) : buf_(buf){};
 
@@ -62,7 +64,6 @@ public:
   inline bool isPacket() const { return matchType(0b000010); }
   inline bool isStruct() const { return matchType(0b000001); }
 
-
   inline bool getBool() const { return getSignedInt(); }
   inline uint64_t getUInt() const { return getUnsignedInt(); }
   inline int64_t  getInt()  const { return getSignedInt(); }
@@ -73,7 +74,7 @@ public:
   uint8_t getBytes(uint8_t* bytes) const;
   uint8_t getString(char* str) const;
   Packet  getPacket();
-  SubEntries getSubEntries();
+  SubEntries getStruct();
 
 
   bool setNull();
@@ -99,9 +100,10 @@ public:
   bool setFloat64(double value);
   bool setBytes(const uint8_t *bytes, uint8_t length);
   bool setString(const char *str);
+  SubEntries setStruct();
+  bool setPacket(const Packet& packet);
 
-
-private:
+private: 
   Entries &entries_;
   uint8_t ptr_;
 
@@ -183,11 +185,12 @@ public:
   using iterator = EntriesIterator;
   using const_iterator = EntriesConstIterator;
 
-  inline iterator begin() { return iterator(*this, header_size()); }
-  inline const_iterator begin() const { return const_iterator(*this, header_size()); }
-  inline iterator end() { return iterator(*this, size()); }
-  inline const_iterator end() const { return const_iterator(*this, size()); }
-
+  inline iterator begin() { return iterator(*this, offset() + header_size()); }
+  inline const_iterator begin() const { return const_iterator(*this, offset() + header_size()); }
+  inline iterator end() { return iterator(*this, offset() + size()); }
+  inline const_iterator end() const { return const_iterator(*this, offset() + size()); }
+  
+  virtual uint8_t offset() const = 0;
   virtual uint8_t size() const = 0;
   virtual uint8_t header_size() const = 0;
 
@@ -241,6 +244,8 @@ public:
                     uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t squence = 0);
 
   // Get info
+
+  inline uint8_t offset() const override { return 0; }
   inline uint8_t size() const override { return isNull() ? 0 : buf_[0]; }
   inline uint8_t header_size() const override { return isLocal() ? 4 : 7; }
 
@@ -294,7 +299,9 @@ private:
 
 class SubEntries : public Entries {
 public:
-  inline uint8_t size() const override { return buf_[0]; }
+
+  inline uint8_t offset() const override { return ptr_; }
+  inline uint8_t size() const override { return buf_[offset()]; }
   inline uint8_t header_size() const override { return 1; }
 
 private:

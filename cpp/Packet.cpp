@@ -6,6 +6,28 @@
 
 namespace wcpp {
 
+Entry::Name &Entry::Name::operator=(const char name[2]) {
+  buf_[0] = (buf_[0] & 0b11100000) | (name[0] & 0b00011111);
+  buf_[1] = (buf_[1] & 0b11100000) | (name[1] & 0b00011111);
+  return *this;
+}
+
+bool Entry::Name::operator==(const char name[2]) {
+  return (buf_[0] & 0b00011111) == (name[0] & 0b00011111) &&
+         (buf_[1] & 0b00011111) == (name[1] & 0b00011111);
+}
+
+bool Entry::Name::operator==(Name name) {
+  return *this == name.buf_;
+}
+
+char Entry::Name::operator[](int i) const {
+  if (i == 0) return (buf_[0] & 0b00011111) + 64; 
+  if (i == 1) return (buf_[1] & 0b00011111) + 96; 
+  return '\0';
+} 
+
+
 bool Entry::setNull() {
   if (!setSize(0))
     return false;
@@ -101,165 +123,6 @@ bool Entry::setString(const char *str) {
   return setBytes(reinterpret_cast<const uint8_t*>(str), std::strlen(str));
 }
 
-bool Entry::setSize(uint8_t size) {
-  return entries_.resize(ptr_, entry_type_size + size);
-}
-
-const uint8_t* Entry::getPayloadBuf() const {
-  return entries_.buf_ + ptr_ + entry_type_size;
-}
-uint8_t* Entry::getPayloadBuf() {
-  return entries_.buf_ + ptr_ + entry_type_size;
-}
-
-
-
-
-EntriesIterator &EntriesIterator::operator++() {
-  // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
-  if (ptr_ + (**this).size() + entry_type_size < entries_.size())
-    ptr_ += (**this).size() + entry_type_size;
-  else ptr_ = entries_.size();
-  return *this;
-}
-
-EntriesConstIterator &EntriesConstIterator::operator++() {
-  // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
-  if (ptr_ + (**this).size() + entry_type_size < entries_.size())
-    ptr_ += (**this).size() + entry_type_size;
-  else ptr_ = entries_.size();
-  return *this;
-}
-
-
-EntriesIterator& EntriesIterator::find(const char name[2]) {
-  while (*this != entries_.end() && (**this).name() == name) ++(*this);
-  return *this;
-}
-
-EntriesConstIterator& EntriesConstIterator::find(const char name[2]) {
-  while (*this != entries_.end() && (**this).name() == name) ++(*this);
-  return *this;
-}
-
-Entries::iterator Entries::find(const char name[2]) {
-  iterator itr = begin();
-  return itr.find(name);
-}
-
-Entries::const_iterator Entries::find(const char name[2]) const {
-  const_iterator itr = begin();
-  return itr.find(name);
-}
-
-Entry Entries::append(const char name[2]) {
-  Entry last(*this, size());
-  last.name() = name;
-  resize(size(), 2);
-  return last;
-}
-
-Packet &Packet::command(uint8_t packet_id, uint8_t component_id) {
-  buf_[1] = packet_id & ~(packet_type_mask);
-  buf_[2] = component_id;
-  buf_[3] = unit_id_local;
-  buf_[0] = header_size();
-  return *this;
-};
-
-Packet &Packet::command(uint8_t packet_id, uint8_t component_id,
-                        uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t sequence) {
-  buf_[1] = packet_id & ~(packet_type_mask);
-  buf_[2] = component_id;
-  buf_[3] = origin_unit_id;
-  buf_[4] = dest_unit_id;
-  buf_[5] = sequence & 0xFF;
-  buf_[6] = sequence >> 8;
-  buf_[0] = header_size();
-  return *this;
-};
-
-Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id) {
-  buf_[1] = packet_id | packet_type_mask;
-  buf_[2] = component_id;
-  buf_[3] = unit_id_local;
-  buf_[0] = header_size();
-  return *this;
-};
-
-Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id,
-                          uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t sequence) {
-  buf_[1] = packet_id | packet_type_mask;
-  buf_[2] = component_id;
-  buf_[3] = origin_unit_id;
-  buf_[4] = dest_unit_id;
-  buf_[5] = sequence & 0xFF;
-  buf_[6] = sequence >> 8;
-  buf_[0] = header_size();
-  return *this;
-};
-
-Packet& Packet::operator=(const Packet& packet) {
-  buf_ = packet.buf_;
-  buf_size_ = packet.buf_size_;
-  ref_change_ = packet.ref_change_;
-  if (ref_change_ != nullptr) ref_change_(*this, +1);
-  return *this;
-}
-
-Packet& Packet::operator=(Packet&& packet) {
-  buf_ = packet.buf_;
-  buf_size_ = packet.buf_size_;
-  ref_change_ = packet.ref_change_;
-  return *this;
-}
-
-bool Packet::copyPayload(const Packet& from) {
-  if (buf_size_ - header_size() < from.size() - from.header_size()) return false;
-
-  buf_[0] = header_size() + from.size() - from.header_size();
-  std::memcpy(buf_ + header_size(), from.buf_ + header_size(),
-              from.size() - from.header_size());
-  return true;
-}
-
-bool Packet::copy(const Packet& from) {
-  if (buf_size_ < from.size()) return false;
-
-  std::memcpy(buf_, from.buf_, from.size() + 1);
-  return true;
-}
-
-bool Packet::resize(uint8_t ptr, uint8_t size_from_ptr) {
-  if (ptr + size_from_ptr >= buf_size_) return false;
-  buf_[0] = ptr + size_from_ptr;
-  return true;
-}
-
-bool SubEntries::resize(uint8_t ptr, uint8_t size_from_ptr) {
-  if (ptr + size_from_ptr >= buf_size_)
-    return false;
-  buf_[0] = ptr + size_from_ptr;
-  parent_.resize(ptr_, buf_[0]);
-  return true;
-}
-
-Entry::Name &Entry::Name::operator=(const char name[2]) {
-  buf_[0] = (buf_[0] & 0b11100000) | (name[0] & 0b00011111);
-  buf_[1] = (buf_[1] & 0b11100000) | (name[1] & 0b00011111);
-  return *this;
-}
-
-bool Entry::Name::operator==(const char name[2]) {
-  return (buf_[0] & 0b00011111) == (name[0] & 0b00011111) &&
-         (buf_[1] & 0b00011111) == (name[1] & 0b00011111);
-}
-
-bool Entry::Name::operator==(Name name) {
-  return *this == name.buf_;
-}
-
-
 Entry::Name Entry::name() const {
   return Name(entries_.buf_ + ptr_); 
 }
@@ -272,8 +135,10 @@ uint8_t Entry::size() const {
     return (type & 0b000111) + 1; // int
   if (type >= 0b000101 && type <= 0b000111)
     return 1 << (type & 0b000011); // float
-  if (type >= 0b000001 && type <= 0b000011)
-    return 1 + entries_.buf_[ptr_ + entry_type_size]; // struct, packet, bytes
+  if (type == 0b000011)
+    return 1 + entries_.buf_[ptr_ + entry_type_size]; // bytes
+  if (type == 0b000001 || type == 0b000010)
+    return entries_.buf_[ptr_ + entry_type_size]; // struct, packet
   if ((type & 0b111000) == 0b001000)
     return type & 0b000111; // short bytes
 
@@ -387,8 +252,157 @@ Packet Entry::getPacket() {
   else            return Packet::null();
 }
 
-SubEntries Entry::getSubEntries() {
-  return SubEntries(entries_, ptr_, getPayloadBuf(), getPayload<uint8_t>(1));
+SubEntries Entry::getStruct() {
+  return SubEntries(entries_, ptr_ + entry_type_size, entries_.buf_, entries_.buf_size_ - ptr_ - entry_type_size);
+}
+
+
+SubEntries Entry::setStruct() {
+  setType(0b000001);
+  setSize(1);
+  setPayload(1, 1);
+  return SubEntries(entries_, ptr_ + entry_type_size, entries_.buf_, entries_.buf_size_ - ptr_ - entry_type_size);
+}
+
+bool Entry::setSize(uint8_t size) {
+  return entries_.resize(ptr_, entry_type_size + size);
+}
+
+const uint8_t* Entry::getPayloadBuf() const {
+  return entries_.buf_ + ptr_ + entry_type_size;
+}
+uint8_t* Entry::getPayloadBuf() {
+  return entries_.buf_ + ptr_ + entry_type_size;
+}
+
+
+EntriesIterator &EntriesIterator::operator++() {
+  // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
+  if (ptr_ + (**this).size() + entry_type_size < entries_.offset() + entries_.size())
+    ptr_ += (**this).size() + entry_type_size;
+  else ptr_ = entries_.offset() + entries_.size();
+  return *this;
+}
+
+EntriesConstIterator &EntriesConstIterator::operator++() {
+  // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
+  if (ptr_ + (**this).size() + entry_type_size < entries_.offset() + entries_.size())
+    ptr_ += (**this).size() + entry_type_size;
+  else ptr_ = entries_.offset() + entries_.size();
+  return *this;
+}
+
+
+EntriesIterator& EntriesIterator::find(const char name[2]) {
+  while (*this != entries_.end() && (**this).name() == name) ++(*this);
+  return *this;
+}
+
+EntriesConstIterator& EntriesConstIterator::find(const char name[2]) {
+  while (*this != entries_.end() && (**this).name() == name) ++(*this);
+  return *this;
+}
+
+Entries::iterator Entries::find(const char name[2]) {
+  iterator itr = begin();
+  return itr.find(name);
+}
+
+Entries::const_iterator Entries::find(const char name[2]) const {
+  const_iterator itr = begin();
+  return itr.find(name);
+}
+
+Entry Entries::append(const char name[2]) {
+  Entry last(*this, offset() + size());
+  last.name() = name;
+  resize(offset() + size(), entry_type_size);
+  return last;
+}
+
+Packet &Packet::command(uint8_t packet_id, uint8_t component_id) {
+  buf_[1] = packet_id & ~(packet_type_mask);
+  buf_[2] = component_id;
+  buf_[3] = unit_id_local;
+  buf_[0] = header_size();
+  return *this;
+};
+
+Packet &Packet::command(uint8_t packet_id, uint8_t component_id,
+                        uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t sequence) {
+  buf_[1] = packet_id & ~(packet_type_mask);
+  buf_[2] = component_id;
+  buf_[3] = origin_unit_id;
+  buf_[4] = dest_unit_id;
+  buf_[5] = sequence & 0xFF;
+  buf_[6] = sequence >> 8;
+  buf_[0] = header_size();
+  return *this;
+};
+
+Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id) {
+  buf_[1] = packet_id | packet_type_mask;
+  buf_[2] = component_id;
+  buf_[3] = unit_id_local;
+  buf_[0] = header_size();
+  return *this;
+};
+
+Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id,
+                          uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t sequence) {
+  buf_[1] = packet_id | packet_type_mask;
+  buf_[2] = component_id;
+  buf_[3] = origin_unit_id;
+  buf_[4] = dest_unit_id;
+  buf_[5] = sequence & 0xFF;
+  buf_[6] = sequence >> 8;
+  buf_[0] = header_size();
+  return *this;
+};
+
+Packet& Packet::operator=(const Packet& packet) {
+  buf_ = packet.buf_;
+  buf_size_ = packet.buf_size_;
+  ref_change_ = packet.ref_change_;
+  if (ref_change_ != nullptr) ref_change_(*this, +1);
+  return *this;
+}
+
+Packet& Packet::operator=(Packet&& packet) {
+  buf_ = packet.buf_;
+  buf_size_ = packet.buf_size_;
+  ref_change_ = packet.ref_change_;
+  return *this;
+}
+
+bool Packet::copyPayload(const Packet& from) {
+  if (buf_size_ - header_size() < from.size() - from.header_size()) return false;
+
+  buf_[0] = header_size() + from.size() - from.header_size();
+  std::memcpy(buf_ + header_size(), from.buf_ + header_size(),
+              from.size() - from.header_size());
+  return true;
+}
+
+bool Packet::copy(const Packet& from) {
+  if (buf_size_ < from.size()) return false;
+
+  std::memcpy(buf_, from.buf_, from.size() + 1);
+  return true;
+}
+
+bool Packet::resize(uint8_t ptr, uint8_t size_from_ptr) {
+  if (ptr + size_from_ptr >= buf_size_) return false;
+  buf_[0] = ptr + size_from_ptr;
+  return true;
+}
+
+bool SubEntries::resize(uint8_t ptr, uint8_t size_from_ptr) {
+  if (ptr + size_from_ptr >= buf_size_)
+    return false;
+  buf_[offset()] = ptr + size_from_ptr - ptr_;
+  parent_.resize(ptr_, buf_[offset()]);
+  return true;
 }
 
 

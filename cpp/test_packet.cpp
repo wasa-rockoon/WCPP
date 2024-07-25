@@ -45,6 +45,9 @@ TEST(PacketTest, BasicAssertions) {
     p.append("Fz").setFloat64(7.89);
     p.append("Bx").setBytes((const uint8_t*)"ABC", 3);
     p.append("By").setString("abcdefghijk");
+    auto sub = p.append("St").setStruct();
+    sub.append("Sx").setInt(54321);
+    sub.append("Sy").setFloat32(3.1415);
 
     for (int i = 0; i < p.size(); i++)
       printf("%02X ", buf[i]);
@@ -124,6 +127,16 @@ TEST(PacketTest, BasicAssertions) {
     memset(str, 0, 32);
     EXPECT_EQ((*e).getString(str), 11);
     EXPECT_STREQ(str, "abcdefghijk");
+    ++e;
+    EXPECT_TRUE((*e).name() == "St");
+    auto st = (*e).getStruct();
+    auto s = st.begin();
+    EXPECT_TRUE((*s).name() == "Sx");
+    EXPECT_EQ((*s).getUInt(), 54321);
+    ++s;
+    EXPECT_TRUE((*s).name() == "Sy");
+    EXPECT_FLOAT_EQ((*s).getFloat32(), 3.1415);
+    // printf("NAME %c%c\n", (*s).name()[0], (*s).name()[1]);
   }
 
   fout.close();

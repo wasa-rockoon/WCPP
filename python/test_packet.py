@@ -1,5 +1,5 @@
 import pytest
-from packet import Packet
+from packet import Packet, Entry
 
 class TestPacket:
     def test_cpp_output(self):
@@ -28,16 +28,21 @@ class TestPacket:
             else:
                 p = Packet.telemetry(ord('D'), 0x11, 0x22, 0x33, 12345)
 
-            p.append("Nu").set_null()
-            p.append("Ix").set_int(1)
-            p.append("Iy").set_int(1234567890)
-            p.append("Iz").set_int(-1234567890)
-            p.append("Fx").set_float16(1.25)
-            p.append("Fy").set_float32(4.56)
-            p.append("Fz").set_float64(7.89)
-            p.append("Bx").set_bytes(b'ABC')
-            p.append("By").set_string('abcdefghijk')
-
+            p.entries = [
+                Entry('Nu').set_null(),
+                Entry('Ix').set_int(1),
+                Entry('Iy').set_int(1234567890),
+                Entry('Iz').set_int(-1234567890),
+                Entry('Fx').set_float16(1.25),
+                Entry('Fy').set_float32(4.56),
+                Entry('Fz').set_float64(7.89),
+                Entry('Bx').set_bytes(b'ABC'),
+                Entry('By').set_string('abcdefghijk'),
+                Entry('St').set_struct([
+                    Entry('Sx').set_int(54321),
+                    Entry('Sy').set_float32(3.1415),
+                ]),
+            ]
 
             buf = p.encode()
             sample_buf += buf
