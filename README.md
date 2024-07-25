@@ -164,3 +164,10 @@ make
 ./test_packet
 ```
 
+### Python (pytest)
+
+```
+pip install -r requiements.txt
+pytest -s
+```
+

@@ -165,6 +165,11 @@ class Entry:
         self.sub_entries = sub_entries
         return self
 
+    def set_packet(self, sub_packet: 'Packet') -> 'Entry':
+        self.type_ = 0b000010
+        self.size = sub_packet.size
+        self.sub_packet = sub_packet
+        return self
     
     def decode(self, buf: bytes) -> int:
         self.type_ = (buf[0] >> 5) | ((buf[1] & 0b11100000) >> 2)
@@ -195,7 +200,7 @@ class Entry:
                 self.sub_entries.append(entry)
 
         if self.is_packet():
-            self.sub_packet = Packet.decode(self.payload[0:self.size])
+            self.sub_packet = Packet.decode(self.payload[:self.size])
 
         return 2 + self.size
 
@@ -208,6 +213,10 @@ class Entry:
                 self.payload += entry_buf
                 self.size += len(entry_buf)
             self.payload[0] = self.size
+
+        if self.is_packet():
+            self.payload = self.sub_packet.encode()
+            self.size = self.sub_packet.size
 
         buf = bytearray(2 + len(self.payload))
         buf[0] = ((self.type_ & 0b000111) << 5) | (ord(self.name[0].upper()) - 64)

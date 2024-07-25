@@ -49,6 +49,15 @@ TEST(PacketTest, BasicAssertions) {
     sub.append("Sx").setInt(54321);
     sub.append("Sy").setFloat32(3.1415);
 
+    uint8_t sub_buf[255];
+    memset(sub_buf, 0, 255);
+    wcpp::Packet sp = wcpp::Packet::empty(sub_buf, 255);
+    sp.telemetry('P', 0x55);
+    sp.append("Px").setInt(0xFF00FF00);
+    sp.append("Py").setFloat32(1.4142);
+
+    p.append("Sp").setPacket(sp);
+
     for (int i = 0; i < p.size(); i++)
       printf("%02X ", buf[i]);
     printf("\n");
@@ -137,6 +146,19 @@ TEST(PacketTest, BasicAssertions) {
     EXPECT_TRUE((*s).name() == "Sy");
     EXPECT_FLOAT_EQ((*s).getFloat32(), 3.1415);
     // printf("NAME %c%c\n", (*s).name()[0], (*s).name()[1]);
+    ++s;
+    EXPECT_TRUE((*s).name() == "Sp");
+    const wcpp::Packet sp_ = (*s).getPacket();
+    EXPECT_EQ(sp_.packet_id(), 'P');
+    EXPECT_TRUE(sp_.isTelemetry());
+    EXPECT_TRUE(sp_.isLocal());
+    EXPECT_EQ(sp_.component_id(), 0x55);
+    auto a = sp_.begin();
+    EXPECT_TRUE((*a).name() == "Px");
+    EXPECT_EQ((*a).getUInt(), 0xFF00FF00);
+    ++a;
+    EXPECT_TRUE((*a).name() == "Py");
+    EXPECT_FLOAT_EQ((*a).getFloat32(), 1.4142);
   }
 
   fout.close();

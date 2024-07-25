@@ -73,8 +73,8 @@ public:
   double  getFloat64() const;
   uint8_t getBytes(uint8_t* bytes) const;
   uint8_t getString(char* str) const;
-  Packet  getPacket();
   SubEntries getStruct();
+  const Packet getPacket();
 
 
   bool setNull();

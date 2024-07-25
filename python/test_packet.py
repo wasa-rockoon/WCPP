@@ -28,6 +28,12 @@ class TestPacket:
             else:
                 p = Packet.telemetry(ord('D'), 0x11, 0x22, 0x33, 12345)
 
+            sp = Packet.telemetry(ord('P'), 0x55)
+            sp.entries = [
+                Entry('Px').set_int(0xFF00FF00),
+                Entry('Py').set_float32(1.4142),
+            ]
+
             p.entries = [
                 Entry('Nu').set_null(),
                 Entry('Ix').set_int(1),
@@ -42,6 +48,7 @@ class TestPacket:
                     Entry('Sx').set_int(54321),
                     Entry('Sy').set_float32(3.1415),
                 ]),
+                Entry('Sp').set_packet(sp),
             ]
 
             buf = p.encode()

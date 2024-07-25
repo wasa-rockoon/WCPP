@@ -28,101 +28,6 @@ char Entry::Name::operator[](int i) const {
 } 
 
 
-bool Entry::setNull() {
-  if (!setSize(0))
-    return false;
-  setType(0b000000);
-  return true;
-}
-
-bool Entry::setInt(const uint8_t *bytes, uint8_t size, bool is_negative) {
-  if (size == 0) {
-    if (!setSize(0)) return false;
-    setType(0b100000);
-  }
-  else if (size == 1 && !is_negative && bytes[0] < 32) {
-    if (!setSize(0)) return false;
-    setType(0b100000 | bytes[0]);
-  }
-  else {
-    if (!setSize(size)) return false;
-    if (is_negative) setType(0b011000 | (size - 1));
-    else             setType(0b010000 | (size - 1));
-    setPayload(bytes, size);
-  }
-  return true;
-}
-
-bool Entry::setFloat16(float value) {
-  if (value == 0.0f) {
-    if (!setSize(0))
-      return false;
-    setType(0b000100);
-  } else {
-    if (!setSize(2))
-      return false;
-    setType(0b000101);
-    float16 value16(value);
-    uint16_t raw = value16.getRaw();
-
-    setPayload(raw, 2);
-  }
-  return true;
-}
-
-bool Entry::setFloat32(float value) {
-  if (value == 0.0f) {
-    if (!setSize(0))
-      return false;
-    setType(0b000100);
-  }
-  else {
-    if (!setSize(4))
-      return false;
-    setType(0b000110);
-    setPayload(value, 4);
-  }
-  return true;
-}
-
-bool Entry::setFloat64(double value) {
-  if (sizeof(double) != 8)
-    return setFloat32(value);
-
-  if (value == 0.0f) {
-    if (!setSize(0))
-      return false;
-    setType(0b000100);
-  } else {
-    if (!setSize(8))
-      return false;
-    setType(0b000111);
-    setPayload(value, 8);
-  }
-  return true;
-}
-
-bool Entry::setBytes(const uint8_t *bytes, uint8_t length) {
-  if (length <= 7) {
-    if (!setSize(length))
-      return false;
-    setType(0b001000 | length);
-    setPayload(bytes, length);
-  }
-  else {
-    if (!setSize(length + 1))
-      return false;
-    setType(0b000011);
-    setPayload(length, 1);
-    setPayload(bytes, length, 1);
-  }
-  return true;
-}
-
-bool Entry::setString(const char *str) {
-  return setBytes(reinterpret_cast<const uint8_t*>(str), std::strlen(str));
-}
-
 Entry::Name Entry::name() const {
   return Name(entries_.buf_ + ptr_); 
 }
@@ -247,7 +152,7 @@ uint8_t Entry::getString(char *str) const {
   return len;
 }
 
-Packet Entry::getPacket() {
+const Packet Entry::getPacket() {
   if (isPacket()) return Packet::decode(getPayloadBuf());
   else            return Packet::null();
 }
@@ -257,11 +162,114 @@ SubEntries Entry::getStruct() {
 }
 
 
+
+bool Entry::setNull() {
+  if (!setSize(0))
+    return false;
+  setType(0b000000);
+  return true;
+}
+
+bool Entry::setInt(const uint8_t *bytes, uint8_t size, bool is_negative) {
+  if (size == 0) {
+    if (!setSize(0)) return false;
+    setType(0b100000);
+  }
+  else if (size == 1 && !is_negative && bytes[0] < 32) {
+    if (!setSize(0)) return false;
+    setType(0b100000 | bytes[0]);
+  }
+  else {
+    if (!setSize(size)) return false;
+    if (is_negative) setType(0b011000 | (size - 1));
+    else             setType(0b010000 | (size - 1));
+    setPayload(bytes, size);
+  }
+  return true;
+}
+
+bool Entry::setFloat16(float value) {
+  if (value == 0.0f) {
+    if (!setSize(0))
+      return false;
+    setType(0b000100);
+  } else {
+    if (!setSize(2))
+      return false;
+    setType(0b000101);
+    float16 value16(value);
+    uint16_t raw = value16.getRaw();
+
+    setPayload(raw, 2);
+  }
+  return true;
+}
+
+bool Entry::setFloat32(float value) {
+  if (value == 0.0f) {
+    if (!setSize(0))
+      return false;
+    setType(0b000100);
+  }
+  else {
+    if (!setSize(4))
+      return false;
+    setType(0b000110);
+    setPayload(value, 4);
+  }
+  return true;
+}
+
+bool Entry::setFloat64(double value) {
+  if (sizeof(double) != 8)
+    return setFloat32(value);
+
+  if (value == 0.0f) {
+    if (!setSize(0))
+      return false;
+    setType(0b000100);
+  } else {
+    if (!setSize(8))
+      return false;
+    setType(0b000111);
+    setPayload(value, 8);
+  }
+  return true;
+}
+
+bool Entry::setBytes(const uint8_t *bytes, uint8_t length) {
+  if (length <= 7) {
+    if (!setSize(length))
+      return false;
+    setType(0b001000 | length);
+    setPayload(bytes, length);
+  }
+  else {
+    if (!setSize(length + 1))
+      return false;
+    setType(0b000011);
+    setPayload(length, 1);
+    setPayload(bytes, length, 1);
+  }
+  return true;
+}
+
+bool Entry::setString(const char *str) {
+  return setBytes(reinterpret_cast<const uint8_t*>(str), std::strlen(str));
+}
+
 SubEntries Entry::setStruct() {
   setType(0b000001);
   setSize(1);
   setPayload(1, 1);
   return SubEntries(entries_, ptr_ + entry_type_size, entries_.buf_, entries_.buf_size_ - ptr_ - entry_type_size);
+}
+
+
+bool Entry::setPacket(const Packet& packet) {
+  setType(0b000010);
+  setSize(packet.size());
+  setPayload(packet.encode(), packet.size()); 
 }
 
 bool Entry::setSize(uint8_t size) {
