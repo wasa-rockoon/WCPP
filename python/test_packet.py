@@ -1,5 +1,5 @@
 import pytest
-from packet import Packet, Entry
+from .packet import Packet, Entry
 
 class TestPacket:
     def test_cpp_output(self):
@@ -9,8 +9,8 @@ class TestPacket:
         i = 0
         while i < len(data):
           p = Packet.decode(data[i:])
-          p.print()
-          i += p.size + 1
+          print(p)
+          i += p.size + 2
 
         f.close()
 
@@ -53,10 +53,10 @@ class TestPacket:
 
             buf = p.encode()
             sample_buf += buf
-            sample_buf += bytes([0])
+            sample_buf += bytes([p.checksum(), 0])
             p = Packet.decode(buf)
 
-            p.print()
+            print(p)
 
             if i == 0:
                 assert p.packet_id == ord('A')

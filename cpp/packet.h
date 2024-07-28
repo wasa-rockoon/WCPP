@@ -10,6 +10,7 @@
 #include "float16.h"
 #include <cstring>
 #include <stdio.h>
+#include "cppcrc.h"
 
 namespace wcpp {
 
@@ -267,7 +268,7 @@ public:
 
   inline uint8_t checksum() const { return checksum(buf_, size()); };
   inline static uint8_t checksum(const uint8_t* buf, uint8_t size) {
-    return crc_8(buf, size);
+    return CRC8::CRC8::calc(buf, size);
   }
 
   Packet& operator=(const Packet& packet);

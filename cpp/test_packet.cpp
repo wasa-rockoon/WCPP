@@ -63,6 +63,7 @@ TEST(PacketTest, BasicAssertions) {
     printf("\n");
 
     fout.write(reinterpret_cast<const char *>(p.encode()), p.size());
+    fout << p.checksum();
     fout << '\0';
 
     switch (i) {

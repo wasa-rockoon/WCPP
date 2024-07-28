@@ -47,6 +47,7 @@ uint8_t Entry::size() const {
   if ((type & 0b111000) == 0b001000)
     return type & 0b000111; // short bytes
 
+  return 0;
 }
 
 void Entry::setType(uint8_t type) {
@@ -269,7 +270,8 @@ SubEntries Entry::setStruct() {
 bool Entry::setPacket(const Packet& packet) {
   setType(0b000010);
   setSize(packet.size());
-  setPayload(packet.encode(), packet.size()); 
+  setPayload(packet.encode(), packet.size());
+  return true; 
 }
 
 bool Entry::setSize(uint8_t size) {
