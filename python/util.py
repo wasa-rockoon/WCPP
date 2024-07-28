@@ -14,7 +14,7 @@ from rich.columns import Columns
 from rich.text import Text
 from rich.layout import Layout
 from rich.panel import Panel
-from packet import Packet, Entry
+from wcpp import Packet, Entry
 
 
 refresh_per_second = 10
