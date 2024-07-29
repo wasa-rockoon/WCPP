@@ -153,15 +153,15 @@ uint8_t Entry::getString(char *str) const {
   return len;
 }
 
-const Packet Entry::getPacket() {
+const Packet Entry::getPacket() const {
   if (isPacket()) return Packet::decode(getPayloadBuf());
   else            return Packet::null();
 }
 
-SubEntries Entry::getStruct() {
-  return SubEntries(entries_, ptr_ + entry_type_size, entries_.buf_, entries_.buf_size_ - ptr_ - entry_type_size);
+const SubEntries Entry::getStruct() const {
+  return SubEntries(entries_, ptr_ + entry_type_size, entries_.buf_, 
+                  (int)entries_.buf_size_ + entries_.offset() - ptr_ - entry_type_size);
 }
-
 
 
 bool Entry::setNull() {
@@ -261,15 +261,16 @@ bool Entry::setString(const char *str) {
 
 SubEntries Entry::setStruct() {
   setType(0b000001);
-  setSize(1);
-  setPayload(1, 1);
-  return SubEntries(entries_, ptr_ + entry_type_size, entries_.buf_, entries_.buf_size_ - ptr_ - entry_type_size);
+  if (setSize(1)) {
+    setPayload(1, 1);
+  } 
+  return SubEntries(entries_, ptr_ + entry_type_size, 
+                    entries_.buf_, (int)entries_.buf_size_ + entries_.offset() - ptr_ - entry_type_size);
 }
 
-
 bool Entry::setPacket(const Packet& packet) {
+  if (!setSize(packet.size())) return false;
   setType(0b000010);
-  setSize(packet.size());
   setPayload(packet.encode(), packet.size());
   return true; 
 }
@@ -287,7 +288,6 @@ uint8_t* Entry::getPayloadBuf() {
 
 
 EntriesIterator &EntriesIterator::operator++() {
-  // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
   if (ptr_ + (**this).size() + entry_type_size < entries_.offset() + entries_.size())
     ptr_ += (**this).size() + entry_type_size;
   else ptr_ = entries_.offset() + entries_.size();
@@ -295,7 +295,6 @@ EntriesIterator &EntriesIterator::operator++() {
 }
 
 EntriesConstIterator &EntriesConstIterator::operator++() {
-  // printf("+ %d %d %d\n", ptr_, (**this).size(), entries_.size());
   if (ptr_ + (**this).size() + entry_type_size < entries_.offset() + entries_.size())
     ptr_ += (**this).size() + entry_type_size;
   else ptr_ = entries_.offset() + entries_.size();
@@ -325,8 +324,10 @@ Entries::const_iterator Entries::find(const char name[2]) const {
 
 Entry Entries::append(const char name[2]) {
   Entry last(*this, offset() + size());
-  last.name() = name;
-  resize(offset() + size(), entry_type_size);
+  if (resize(offset() + size(), entry_type_size)) {
+    last.name() = name;
+    last.setNull();
+  }
   return last;
 }
 
@@ -402,16 +403,19 @@ bool Packet::copy(const Packet& from) {
 }
 
 bool Packet::resize(uint8_t ptr, uint8_t size_from_ptr) {
-  if (ptr + size_from_ptr >= buf_size_) return false;
+  // printf("RESIZE P %d %d %d\n", ptr, size_from_ptr, buf_size_);
+  if ((int)ptr + size_from_ptr > buf_size_) return false;
   buf_[0] = ptr + size_from_ptr;
   return true;
 }
 
 bool SubEntries::resize(uint8_t ptr, uint8_t size_from_ptr) {
-  if (ptr + size_from_ptr >= buf_size_)
+  // printf("RESIZE S %d %d %d %d\n", ptr, ptr_, size_from_ptr, buf_size_);
+  if ((int)ptr + size_from_ptr - offset() > buf_size_)
     return false;
-  buf_[offset()] = ptr + size_from_ptr - ptr_;
-  parent_.resize(ptr_, buf_[offset()]);
+  if (!parent_.resize(ptr, size_from_ptr)) 
+    return false;
+  buf_[offset()] = (int)ptr + size_from_ptr - offset();
   return true;
 }
 

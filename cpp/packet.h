@@ -6,11 +6,10 @@
 #include <stdint.h>
 #endif
 
-#include "checksum.h"
-#include "float16.h"
 #include <cstring>
 #include <stdio.h>
 #include "cppcrc.h"
+#include "float16.h"
 
 namespace wcpp {
 
@@ -74,8 +73,8 @@ public:
   double  getFloat64() const;
   uint8_t getBytes(uint8_t* bytes) const;
   uint8_t getString(char* str) const;
-  SubEntries getStruct();
-  const Packet getPacket();
+  const SubEntries getStruct() const;
+  const Packet getPacket() const;
 
 
   bool setNull();
@@ -104,7 +103,7 @@ public:
   SubEntries setStruct();
   bool setPacket(const Packet& packet);
 
-private: 
+// private: 
   Entries &entries_;
   uint8_t ptr_;
 
@@ -171,7 +170,7 @@ public:
 
   EntriesConstIterator &find(const char name[2]);
 
-private:
+// private:
   const Entries &entries_;
   uint8_t ptr_;
 
@@ -195,6 +194,8 @@ public:
   virtual uint8_t size() const = 0;
   virtual uint8_t header_size() const = 0;
 
+  inline int size_remain() const { return (int)buf_size_ - (int)size(); }
+
   iterator find(const char name[2]);
   const_iterator find(const char name[2]) const;
 
@@ -203,7 +204,7 @@ public:
 
   Entry append(const char name[2]);
 
-protected:
+// protected:
   uint8_t* buf_;
   uint8_t buf_size_;
 
@@ -227,8 +228,8 @@ public:
   static Packet empty(uint8_t* buf, uint8_t N, ref_change_t ref_change = nullptr) { 
     return Packet(buf, N, ref_change); 
   }
-  static const Packet decode(uint8_t* buf, ref_change_t ref_change = nullptr) { 
-    return Packet(buf, ref_change); 
+  static const Packet decode(const uint8_t* buf, ref_change_t ref_change = nullptr) { 
+    return Packet(const_cast<uint8_t*>(buf), ref_change); 
   }
 
   inline Packet(const Packet& packet): Packet(packet.buf_, packet.buf_size_, packet.ref_change_) {

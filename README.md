@@ -161,7 +161,7 @@ mkdir cpp/build
 cd cpp/build
 cmake ..
 make
-./test_packet
+./test_packet --gtest_break_on_failure --gtest_repeat=1000
 ```
 
 ### Python (pytest)

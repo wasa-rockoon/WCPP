@@ -17,7 +17,7 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-add_library(wcpp STATIC packet.cpp float16.cpp crc8.c)
+add_library(wcpp STATIC packet.cpp float16.cpp)
 add_executable(
   test_packet
   test_packet.cpp
