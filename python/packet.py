@@ -191,7 +191,7 @@ class Entry:
         if self.type_ == 0b000000 or self.type_ == 0b000100 or self.type_ & 0b100000:
             self.size = 0
             # null, 0.0f, short int
-        elif (self.type_ & 0b010000) == 0b010000:
+        elif (self.type_ & 0b110000) == 0b010000:
             self.size = (self.type_ & 0b000111) + 1
             # int
         elif self.type_ >= 0b000101 and self.type_ <= 0b000111:
