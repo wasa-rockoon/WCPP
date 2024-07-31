@@ -89,14 +89,14 @@ def main():
                     raw_data.extend(data)
                 except:
                     ser.close()
-                    continue
-
-                for packet in parse_packet(data):
-                    add_packet(all_packets, packet, datetime.now())
 
                 if not ser.isOpen():
                     status = 'disconnected'
                     layout['source'].update(Text(status + ' ' + source)),
+                    continue
+
+                for packet in parse_packet(data):
+                    add_packet(all_packets, packet, datetime.now())
 
 
 
@@ -115,10 +115,10 @@ def help_text() -> str:
     return '''
 h: select previous id
 l: select next id
-j: next packet
 k: previous packet
-J: latest packet
+j: next packet
 K: first packet
+J: latest packet
 s: save raw data
 e: export selected as CSV
 E: export all as CSV

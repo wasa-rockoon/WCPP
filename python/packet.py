@@ -84,7 +84,7 @@ class Entry:
         return bytes()
 
     def string(self) -> str:
-        return self.bytes().decode()
+        return self.bytes().decode(errors='ignore')
 
     def packet(self) -> Optional["Packet"]:
         return self.sub_packet
@@ -274,7 +274,7 @@ class Entry:
 
         s = indent + self.name + ': ' + type_str + ' = ' + payload_str + '\n'
 
-        if self.is_packet():
+        if self.is_packet() and self.packet():
             s += self.packet().__str__(indent + '  ')
         elif self.is_struct():
             for entry in self.struct():
@@ -442,5 +442,5 @@ class Packet:
             return packet
 
         except Exception as e:
-            raise e
+            # raise e
             return None
