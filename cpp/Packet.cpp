@@ -36,7 +36,7 @@ uint8_t Entry::size() const {
   uint8_t type = getType();
   if (type == 0b000000 || type == 0b000100 || type & 0b100000)
     return 0; // null, 0.0f, short int
-  if ((type & 0b010000) == 0b010000)
+  if ((type & 0b110000) == 0b010000)
     return (type & 0b000111) + 1; // int
   if (type >= 0b000101 && type <= 0b000111)
     return 1 << (type & 0b000011); // float
