@@ -11,19 +11,73 @@
 #include <random>
 
 
-wcpp::Packet generateRandomPacket(uint8_t* buf, std::mt19937& rand, uint8_t size_max);
-bool appendRandomEntry_(wcpp::Entries& p, std::mt19937& rand);
-void assertRandomPacket(const wcpp::Packet& p, std::mt19937& rand);
-bool assertRandomEntry(wcpp::EntriesConstIterator e, std::mt19937& rand);
+class RandomSequence {
+public:
+  class iterator {
+  public:
+    iterator(RandomSequence& sequence_): sequence_(sequence_), i_(-1) {
+      ++(*this);
+    }
+    iterator(const iterator& it): sequence_(it.sequence_), i_(it.i_) {}
+    uint64_t operator*() const { 
+      return sequence_.history_.at(i_);
+    }
+    uint64_t operator()() { 
+      uint64_t rand(**this);
+      ++(*this);
+      return rand;
+    }
+    iterator& operator++() {
+      i_++;
+      while (i_ >= sequence_.history_.size()) {
+        sequence_.history_.push_back(sequence_.engine_());
+      }
+      return *this;
+    }
+    iterator& operator=(const iterator& it) {
+      sequence_ = it.sequence_;
+      i_ = it.i_;
+      return *this;
+    }
+    iterator next() {
+      iterator n(*this);
+      ++n;
+      return n;
+    }
+    iterator& reroll() {
+      sequence_.history_.erase(std::next(sequence_.history_.begin(), i_), sequence_.history_.end());
+      sequence_.history_.push_back(sequence_.engine_());
+      return *this;
+    }
+  // private:
+    RandomSequence& sequence_;
+    int i_;
+  };
 
-bool appendRandomEntry(wcpp::Entries& p, std::mt19937& rand) {
+  RandomSequence(uint64_t seed): engine_(seed) {}
+  iterator begin() { return iterator(*this); }
+
+private:
+  std::vector<uint64_t> history_;
+  std::mt19937_64 engine_;
+};
+
+
+wcpp::Packet generateRandomPacket(uint8_t* buf, RandomSequence::iterator& rand);
+// bool appendRandomEntry_(wcpp::Entries& p, RandomSequence::iterator rand);
+void assertRandomPacket(const wcpp::Packet& p, RandomSequence::iterator& rand);
+void assertRandomEntry(wcpp::EntriesConstIterator e, RandomSequence::iterator& rand);
+
+bool appendRandomEntry(wcpp::Entries& p, RandomSequence::iterator& rand) {
   char name[] = {(char)(rand()%32 + 64), (char)(rand()%32 + 96)};
 
   wcpp::Entry e = p.append(name);
 
   unsigned type = rand() % 13;
-  // printf("NAME %c%c %d %d %d\n", name[0], name[1], p.size_remain(), p.size(), type);
-  // if (p.size_remain() == 0) return false;
+  // printf("NAME %c%c %d %d %d %d\n", name[0], name[1], p.size_remain(), p.size(), type, bool(e));
+  // if (p.size_remain() <= 0) return false;
+
+  if (!e) return false;
 
   switch (type) {
     case 0:
@@ -32,8 +86,10 @@ bool appendRandomEntry(wcpp::Entries& p, std::mt19937& rand) {
       return e.setNull();
     case 2:
       return e.setInt(rand()%32);
-    case 3:
-      return e.setInt((long)rand()%512 - 256);
+    case 3: {
+      long v = (long)(rand()%512) - 256;
+      return e.setInt(v);
+    }
     case 4:
       return e.setInt((long)rand() - 0x80000000);
     case 5:
@@ -57,7 +113,7 @@ bool appendRandomEntry(wcpp::Entries& p, std::mt19937& rand) {
       char str[65];
       int len = rand() % 64;
       for (int i = 0; i < len; i++) {
-        str[i] = rand()%128;
+        str[i] = rand()%127 + 1;
       }
       str[len] = 0; 
       return e.setString(str);
@@ -65,9 +121,15 @@ bool appendRandomEntry(wcpp::Entries& p, std::mt19937& rand) {
     case 11: {
       auto sub = e.setStruct();
       if (e.size() < 1) return false;
+      auto r = rand;
+      auto s = sub.begin();
       while (rand() % 8) {
-        if (sub.size_remain() < 2) return false;
-        if (!appendRandomEntry(sub, rand)) return false;
+        if (!appendRandomEntry(sub, rand)) {
+          rand = r.reroll();
+          (*s).remove();
+        }
+        else ++s;
+        r = rand; 
       }
       return true;
     }
@@ -75,15 +137,14 @@ bool appendRandomEntry(wcpp::Entries& p, std::mt19937& rand) {
       uint8_t sub_buf[255];
       memset(sub_buf, 0, 255);
       if (p.size_remain() < 7) return false;
-      wcpp::Packet sp = generateRandomPacket(sub_buf, rand, p.size_remain());
-      bool b = e.setPacket(sp); 
-      return b ;
+      wcpp::Packet sp = generateRandomPacket(sub_buf, rand);
+      return e.setPacket(sp); 
     }
   }
   return false;
 }
 
-bool assertRandomEntry(wcpp::EntriesConstIterator e, std::mt19937& rand) {
+void assertRandomEntry(wcpp::EntriesConstIterator e, RandomSequence::iterator& rand) {
   char name[] = {(char)(rand()%32 + 64), (char)(rand()%32 + 96)};
 
   unsigned type = rand() % 13;
@@ -96,55 +157,41 @@ bool assertRandomEntry(wcpp::EntriesConstIterator e, std::mt19937& rand) {
       EXPECT_TRUE((*e).isNull());
       break;
     case 2: {
-      int value = rand()%32;
-      if ((*e).isNull()) return false;
       EXPECT_TRUE((*e).isInt());
-      EXPECT_EQ((*e).getInt(), value);
+      EXPECT_EQ((*e).getInt(), rand()%32);
       break;
     }
     case 3: {
-      int value = rand()%512 - 256;
-      if ((*e).isNull()) return false;
       EXPECT_TRUE((*e).isInt());
-      EXPECT_EQ((*e).getInt(), value);
+      EXPECT_EQ((*e).getInt(), (long)(rand()%512) - 256);
       break;
     }
     case 4: {
-      long value = (long)rand()- 0x80000000;
-      if ((*e).isNull()) return false;
       EXPECT_TRUE((*e).isInt());
-      EXPECT_EQ((*e).getInt(), value);
+      EXPECT_EQ((*e).getInt(), (long)rand()- 0x80000000);
       break;
     }
     case 5: {
-      long value = (long)rand() * ((long)rand()-0x80000000);
-      if ((*e).isNull()) return false;
       EXPECT_TRUE((*e).isInt());
-      EXPECT_EQ((*e).getInt(), value);
+      EXPECT_EQ((*e).getInt(), (long)rand() * ((long)rand()-0x80000000));
       break;
     }
     case 6: {
-      float16 value = float16((float)rand()/(float)((long)rand()-0x80000000));
-      if ((*e).isNull()) return false;
       EXPECT_TRUE((*e).isFloat());
       EXPECT_TRUE((*e).isFloat16());
-      EXPECT_EQ((*e).getFloat16(), value);
+      EXPECT_EQ((*e).getFloat16(), float16((float)rand()/(float)((long)rand()-0x80000000)));
       break;
     }
     case 7: {
-      float value = (float)rand()/(float)((long)rand()-0x80000000);
-      if ((*e).isNull()) return false;
       EXPECT_TRUE((*e).isFloat());
       EXPECT_TRUE((*e).isFloat32());
-      EXPECT_EQ((*e).getFloat32(), value);
+      EXPECT_EQ((*e).getFloat32(), (float)rand()/(float)((long)rand()-0x80000000));
       break;
     }
     case 8: {
-      double value = (double)rand()/(double)((long)rand()-0x80000000);
-      if ((*e).isNull()) return false;
       EXPECT_TRUE((*e).isFloat());
       EXPECT_TRUE((*e).isFloat64());
-      EXPECT_EQ((*e).getFloat64(), value);
+      EXPECT_EQ((*e).getFloat64(), (double)rand()/(double)((long)rand()-0x80000000));
       break;
     }
     case 9: {
@@ -153,7 +200,6 @@ bool assertRandomEntry(wcpp::EntriesConstIterator e, std::mt19937& rand) {
       for (int i = 0; i < len; i++) {
         bytes[i] = rand();
       }
-      if ((*e).isNull()) return false;
       EXPECT_TRUE((*e).isBytes());
       uint8_t b[64];
       EXPECT_EQ((*e).getBytes(b), len);
@@ -164,44 +210,39 @@ bool assertRandomEntry(wcpp::EntriesConstIterator e, std::mt19937& rand) {
       char str[65];
       int len = rand() % 64;
       for (int i = 0; i < len; i++) {
-        str[i] = rand()%128;
+        str[i] = rand()%127 + 1;
       }
-      if ((*e).isNull()) return false;
       EXPECT_TRUE((*e).isBytes());
       str[len] = 0; 
       char s[65];
       (*e).getString(s);
-      // EXPECT_EQ((*e).getString(s), len);
+      EXPECT_EQ((*e).getString(s), len);
       EXPECT_STREQ(s, str);
       break;
     }
     case 11: {
-      if ((*e).size() == 0) return false;
       EXPECT_TRUE((*e).isStruct());
       const auto st = (*e).getStruct();
-      if ((*e).size() < 1) return false;
       wcpp::EntriesConstIterator sub = st.begin();
       while (rand() % 8) {
-        if (sub == st.end() && st.size_remain() < 2) return false;
-        if (!assertRandomEntry(sub, rand)) return false;
-        if (sub == st.end()) return false;
+        EXPECT_NE(sub, st.end());
+        assertRandomEntry(sub, rand);
         ++sub;
       }
       break;
     }
     case 12: {
-      if ((*e).size() == 0) return false;
       EXPECT_TRUE((*e).isPacket());
       wcpp::Packet sp = (*e).getPacket();
+      printf("pac %X %d %X\n", sp.packet_id(), rand.i_, *rand.next() % 128);
       assertRandomPacket(sp, rand);
       break;
     }
   }
-  return true;
 }
 
-wcpp::Packet generateRandomPacket(uint8_t* buf, std::mt19937& rand, uint8_t size_max=255) {
-  wcpp::Packet p = wcpp::Packet::empty(buf, size_max);
+wcpp::Packet generateRandomPacket(uint8_t* buf, RandomSequence::iterator& rand) {
+  wcpp::Packet p = wcpp::Packet::empty(buf, wcpp::size_max);
   switch (rand()%4) {
   case 0:
     p.command(rand()%128, rand()%256);
@@ -216,15 +257,22 @@ wcpp::Packet generateRandomPacket(uint8_t* buf, std::mt19937& rand, uint8_t size
     p.telemetry(rand()%128, rand()%256, rand()%255+1, rand()%255+1, rand()%65536);
     break;
   }
+
+  auto r = rand;
+  auto e = p.begin();
   while (rand() % 8) {
-    if (p.size_remain() < 2) break;
-    if (!appendRandomEntry(p, rand)) break;
+    if (!appendRandomEntry(p, rand)) {
+      rand = r.reroll();
+      (*e).remove();
+    }
+    else ++e;
+    r = rand; 
   }
 
   return p;
 }
 
-void assertRandomPacket(const wcpp::Packet& p, std::mt19937& rand) {
+void assertRandomPacket(const wcpp::Packet& p, RandomSequence::iterator& rand) {
   switch (rand()%4) {
   case 0:
     EXPECT_EQ(p.packet_id(), rand()%128);
@@ -268,28 +316,24 @@ void assertRandomPacket(const wcpp::Packet& p, std::mt19937& rand) {
 
   auto e = p.begin();
   while (rand() % 8) {
-    if (e == p.end() && p.size_remain() < 2) break;
-    if (!assertRandomEntry(e, rand)) break;
-    if (e == p.end()) break;
+    EXPECT_NE(e, p.end());
+    assertRandomEntry(e, rand);
     ++e;
   }
 }
 
 TEST(EncodeDecodeTest, BasicAssertions) {
-  std::random_device seed_gen;
-  unsigned seed = seed_gen();
+  unsigned seed = testing::UnitTest::GetInstance()->random_seed();
   // seed = -1524307131;
   printf("SEED: %d\n", seed);
-  std::mt19937 rand_encode(seed);
-  std::mt19937 rand_decode(seed);
+  RandomSequence sequence(seed);
   uint8_t buf[256];
-  memset(buf, 0, 255);
-
+  // memset(buf, 0, 255);
   buf[255] = 0;
-  wcpp::Packet p = generateRandomPacket(buf, rand_encode);
-  EXPECT_EQ(buf[255], 0);
+  auto r_encode = sequence.begin();
+  wcpp::Packet p = generateRandomPacket(buf, r_encode);
 
-  printf("packet: %d\n", p.size());
+  printf("packet: %X %d\n", p.packet_id(), p.size());
 
   std::ofstream fout;
   fout.open("data.bin", std::ios::out|std::ios::binary|std::ios::trunc);
@@ -298,11 +342,15 @@ TEST(EncodeDecodeTest, BasicAssertions) {
   fout << '\0';
   fout.close();
 
+  EXPECT_EQ(buf[255], 0);
+
   for (int i = 0; i < p.size(); i++)
     printf("%02X ", buf[i]);
   printf("\n");
 
-  assertRandomPacket(p, rand_decode);
+  auto r_decode = sequence.begin();
+  assertRandomPacket(p, r_decode);
+
 }
 
 TEST(PacketTest, BasicAssertions) {

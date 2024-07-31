@@ -50,6 +50,8 @@ public:
   Name name() const;
   uint8_t size() const;
 
+  operator bool() const;
+
   inline bool isNull()   const { return matchType(0b000000); }
   inline bool isInt()    const {
     return matchType(0b010000, 0b110000) || matchType(0b100000, 0b100000);
@@ -76,6 +78,7 @@ public:
   const SubEntries getStruct() const;
   const Packet getPacket() const;
 
+  bool remove();
 
   bool setNull();
   template<typename T> bool setInt(T value) {
@@ -115,7 +118,7 @@ public:
 
   void setType(uint8_t type);
   uint8_t getType() const;
-  bool setSize(uint8_t size);
+  bool setSize(uint8_t size_new);
 
   inline void setPayload(const uint8_t *payload, uint8_t size,
                          uint8_t offset = 0) {
@@ -212,7 +215,7 @@ public:
   Entries(uint8_t *buf, uint8_t buf_size): buf_(buf), buf_size_(buf_size) {};
 
 private:
-  virtual bool resize(uint8_t ptr, uint8_t size_from_ptr) = 0;
+  virtual bool resize(uint8_t ptr, uint8_t size_from_ptr, uint8_t size_from_ptr_old) = 0;
 
   friend SubEntries;
   friend Entry;
@@ -293,7 +296,7 @@ private:
   : Entries(buf, buf_size), ref_change_(ref_change) {}
 
 
-  bool resize(uint8_t ptr, uint8_t size_from_ptr) override;
+  bool resize(uint8_t ptr, uint8_t size_from_ptr, uint8_t size_from_ptr_old) override;
 
   friend Entry;
 };
@@ -313,7 +316,7 @@ private:
   SubEntries(Entries& parent, uint8_t ptr, uint8_t* buf, uint8_t buf_size)
     : Entries(buf, buf_size), parent_(parent), ptr_(ptr) {}
 
-  bool resize(uint8_t ptr, uint8_t size_from_ptr) override;
+  bool resize(uint8_t ptr, uint8_t size_from_ptr, uint8_t size_from_ptr_old) override;
 
   friend Entry;
 };

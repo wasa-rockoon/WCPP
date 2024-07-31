@@ -50,6 +50,10 @@ uint8_t Entry::size() const {
   return 0;
 }
 
+Entry::operator bool() const {
+  return ptr_ + entry_type_size < entries_.buf_size_;
+}
+
 void Entry::setType(uint8_t type) {
   entries_.buf_[ptr_ + 0] =
     (entries_.buf_[ptr_ + 0] & 0b00011111) | ((type & 0b000111) << 5);
@@ -66,7 +70,7 @@ int64_t Entry::getSignedInt() const {
   if (matchType(0b010000, 0b110000)) {
     bool is_negative = getType() & 0b001000;
     if (is_negative)
-      return - getPayload<uint64_t>((getType() & 0b000111) + 1);
+      return - (int64_t)getPayload<uint64_t>((getType() & 0b000111) + 1);
     else
       return getPayload<uint64_t>((getType() & 0b000111) + 1);
   }
@@ -80,7 +84,7 @@ uint64_t Entry::getUnsignedInt() const {
   if (matchType(0b010000, 0b110000)) {
     bool is_negative = getType() & 0b001000;
     if (is_negative)
-      return (uint64_t)-getPayload<uint64_t>((getType() & 0b000111) + 1);
+      return - (int64_t) getPayload<uint64_t>((getType() & 0b000111) + 1);
     else
       return getPayload<uint64_t>((getType() & 0b000111) + 1);
   }
@@ -159,10 +163,16 @@ const Packet Entry::getPacket() const {
 }
 
 const SubEntries Entry::getStruct() const {
-  return SubEntries(entries_, ptr_ + entry_type_size, entries_.buf_, 
-                  (int)entries_.buf_size_ + entries_.offset() - ptr_ - entry_type_size);
+  return SubEntries(entries_, ptr_ + entry_type_size, entries_.buf_, entries_.buf_size_);
 }
 
+
+bool Entry::remove() {
+  if (*this) {
+    return entries_.resize(ptr_, 0, entry_type_size + size());
+  }
+  return true;
+}
 
 bool Entry::setNull() {
   if (!setSize(0))
@@ -260,12 +270,11 @@ bool Entry::setString(const char *str) {
 }
 
 SubEntries Entry::setStruct() {
-  setType(0b000001);
   if (setSize(1)) {
+    setType(0b000001);
     setPayload(1, 1);
   } 
-  return SubEntries(entries_, ptr_ + entry_type_size, 
-                    entries_.buf_, (int)entries_.buf_size_ + entries_.offset() - ptr_ - entry_type_size);
+  return SubEntries(entries_, ptr_ + entry_type_size, entries_.buf_, entries_.buf_size_);
 }
 
 bool Entry::setPacket(const Packet& packet) {
@@ -275,8 +284,8 @@ bool Entry::setPacket(const Packet& packet) {
   return true; 
 }
 
-bool Entry::setSize(uint8_t size) {
-  return entries_.resize(ptr_, entry_type_size + size);
+bool Entry::setSize(uint8_t size_new) {
+  return entries_.resize(ptr_ + entry_type_size, size_new, size());
 }
 
 const uint8_t* Entry::getPayloadBuf() const {
@@ -324,9 +333,9 @@ Entries::const_iterator Entries::find(const char name[2]) const {
 
 Entry Entries::append(const char name[2]) {
   Entry last(*this, offset() + size());
-  if (resize(offset() + size(), entry_type_size)) {
+  if (resize(offset() + size(), entry_type_size, 0)) {
     last.name() = name;
-    last.setNull();
+    last.setType(0b000000);
   }
   return last;
 }
@@ -402,19 +411,20 @@ bool Packet::copy(const Packet& from) {
   return true;
 }
 
-bool Packet::resize(uint8_t ptr, uint8_t size_from_ptr) {
+bool Packet::resize(uint8_t ptr, uint8_t size_from_ptr, uint8_t size_from_ptr_old) {
   // printf("RESIZE P %d %d %d\n", ptr, size_from_ptr, buf_size_);
-  if ((int)ptr + size_from_ptr > buf_size_) return false;
+  if (size() + size_from_ptr - size_from_ptr_old > buf_size_) return false;
+  // std::memcpy(buf_ + ptr, buf_ + ptr + size_from_ptr, size() - ptr);
   buf_[0] = ptr + size_from_ptr;
   return true;
 }
 
-bool SubEntries::resize(uint8_t ptr, uint8_t size_from_ptr) {
-  // printf("RESIZE S %d %d %d %d\n", ptr, ptr_, size_from_ptr, buf_size_);
-  if ((int)ptr + size_from_ptr - offset() > buf_size_)
-    return false;
-  if (!parent_.resize(ptr, size_from_ptr)) 
-    return false;
+bool SubEntries::resize(uint8_t ptr, uint8_t size_from_ptr, uint8_t size_from_ptr_old) {
+  // printf("RESIZE S %d %d %d %d %d %d\n", offset(), size(), ptr, size_from_ptr, size_from_ptr_old, buf_size_);
+  if (size() + size_from_ptr - size_from_ptr_old + offset() > buf_size_) return false;
+  if (!parent_.resize(ptr, size_from_ptr, size_from_ptr_old)) return false;
+  // buf_[offset()] += size_from_ptr - size_from_ptr_old;
+
   buf_[offset()] = (int)ptr + size_from_ptr - offset();
   return true;
 }
