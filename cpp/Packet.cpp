@@ -167,11 +167,10 @@ const SubEntries Entry::getStruct() const {
 }
 
 
-bool Entry::remove() {
+void Entry::remove() {
   if (*this) {
-    return entries_.resize(ptr_, 0, entry_type_size + size());
+    entries_.resize(ptr_, 0, entry_type_size + size());
   }
-  return true;
 }
 
 bool Entry::setNull() {
@@ -326,50 +325,77 @@ Entries::iterator Entries::find(const char name[2]) {
   return itr.find(name);
 }
 
+Entry EntriesIterator::insert(const char name[2]) {
+  Entry e(entries_, ptr_);
+  if (entries_.resize(ptr_, entry_type_size, 0)) {
+    e.name() = name;
+    e.setType(0b000000);
+  }
+  return e;
+}
+
 Entries::const_iterator Entries::find(const char name[2]) const {
   const_iterator itr = begin();
   return itr.find(name);
 }
 
+
+Entries::iterator Entries::at(unsigned n) {
+  iterator itr = begin();
+  for (int i = 0; i < n; i++) ++itr;
+  return itr;
+}
+
+Entries::const_iterator Entries::at(unsigned n) const {
+  const_iterator itr = begin();
+  for (int i = 0; i < n; i++) ++itr;
+  return itr;
+}
+
 Entry Entries::append(const char name[2]) {
-  Entry last(*this, offset() + size());
-  if (resize(offset() + size(), entry_type_size, 0)) {
-    last.name() = name;
-    last.setType(0b000000);
-  }
-  return last;
+  return end().insert(name);
+}
+
+
+void Entries::clear() {
+  printf("CLEAR %d %d %d\n", offset(), header_size(), size());
+  resize(offset() + header_size(), 0, size() - header_size());
 }
 
 Packet &Packet::command(uint8_t packet_id, uint8_t component_id) {
   buf_[1] = packet_id & ~(packet_type_mask);
   buf_[2] = component_id;
   buf_[3] = unit_id_local;
-  buf_[0] = header_size();
+  resize(0, 4, buf_[0]);
   return *this;
 };
 
 Packet &Packet::command(uint8_t packet_id, uint8_t component_id,
                         uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t sequence) {
+  unsigned header_size_old = header_size();
   buf_[1] = packet_id & ~(packet_type_mask);
   buf_[2] = component_id;
   buf_[3] = origin_unit_id;
   buf_[4] = dest_unit_id;
   buf_[5] = sequence & 0xFF;
   buf_[6] = sequence >> 8;
-  buf_[0] = header_size();
+  resize(0, 7, buf_[0]);
   return *this;
 };
 
 Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id) {
+  unsigned header_size_old = header_size();
   buf_[1] = packet_id | packet_type_mask;
   buf_[2] = component_id;
   buf_[3] = unit_id_local;
   buf_[0] = header_size();
+  resize(0, 4, buf_[0]);
   return *this;
 };
 
 Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id,
                           uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t sequence) {
+  unsigned header_size_old = header_size();
   buf_[1] = packet_id | packet_type_mask;
   buf_[2] = component_id;
   buf_[3] = origin_unit_id;
@@ -377,6 +403,7 @@ Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id,
   buf_[5] = sequence & 0xFF;
   buf_[6] = sequence >> 8;
   buf_[0] = header_size();
+  resize(0, 7, buf_[0]);
   return *this;
 };
 
@@ -412,10 +439,10 @@ bool Packet::copy(const Packet& from) {
 }
 
 bool Packet::resize(uint8_t ptr, uint8_t size_from_ptr, uint8_t size_from_ptr_old) {
-  // printf("RESIZE P %d %d %d\n", ptr, size_from_ptr, buf_size_);
+  // printf("RESIZE P %d %d %d %d\n", ptr, size_from_ptr, size_from_ptr_old, buf_size_);
   if (size() + size_from_ptr - size_from_ptr_old > buf_size_) return false;
-  // std::memcpy(buf_ + ptr, buf_ + ptr + size_from_ptr, size() - ptr);
-  buf_[0] = ptr + size_from_ptr;
+  std::memcpy(buf_ + ptr + size_from_ptr, buf_ + ptr + size_from_ptr_old, size() - ptr - size_from_ptr_old);
+  buf_[0] += size_from_ptr - size_from_ptr_old;
   return true;
 }
 
@@ -423,9 +450,7 @@ bool SubEntries::resize(uint8_t ptr, uint8_t size_from_ptr, uint8_t size_from_pt
   // printf("RESIZE S %d %d %d %d %d %d\n", offset(), size(), ptr, size_from_ptr, size_from_ptr_old, buf_size_);
   if (size() + size_from_ptr - size_from_ptr_old + offset() > buf_size_) return false;
   if (!parent_.resize(ptr, size_from_ptr, size_from_ptr_old)) return false;
-  // buf_[offset()] += size_from_ptr - size_from_ptr_old;
-
-  buf_[offset()] = (int)ptr + size_from_ptr - offset();
+  buf_[offset()] += size_from_ptr - size_from_ptr_old;
   return true;
 }
 

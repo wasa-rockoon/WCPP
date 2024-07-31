@@ -78,7 +78,7 @@ public:
   const SubEntries getStruct() const;
   const Packet getPacket() const;
 
-  bool remove();
+  void remove();
 
   bool setNull();
   template<typename T> bool setInt(T value) {
@@ -106,7 +106,7 @@ public:
   SubEntries setStruct();
   bool setPacket(const Packet& packet);
 
-// private: 
+private: 
   Entries &entries_;
   uint8_t ptr_;
 
@@ -154,6 +154,8 @@ public:
   inline bool operator!=(const EntriesIterator &i) const { return ptr_ != i.ptr_; }
 
   EntriesIterator &find(const char name[2]);
+  Entry insert(const char name[2]);
+  EntriesIterator remove() { (**this).remove(); return *this; }
 
 private:
   Entries &entries_;
@@ -173,7 +175,7 @@ public:
 
   EntriesConstIterator &find(const char name[2]);
 
-// private:
+private:
   const Entries &entries_;
   uint8_t ptr_;
 
@@ -192,8 +194,9 @@ public:
   inline const_iterator begin() const { return const_iterator(*this, offset() + header_size()); }
   inline iterator end() { return iterator(*this, offset() + size()); }
   inline const_iterator end() const { return const_iterator(*this, offset() + size()); }
+  iterator at(unsigned n);
+  const_iterator at(unsigned n) const;
   
-  virtual uint8_t offset() const = 0;
   virtual uint8_t size() const = 0;
   virtual uint8_t header_size() const = 0;
 
@@ -207,7 +210,9 @@ public:
 
   Entry append(const char name[2]);
 
-// protected:
+  void clear();
+
+protected:
   uint8_t* buf_;
   uint8_t buf_size_;
 
@@ -215,10 +220,13 @@ public:
   Entries(uint8_t *buf, uint8_t buf_size): buf_(buf), buf_size_(buf_size) {};
 
 private:
+  virtual uint8_t offset() const = 0;
   virtual bool resize(uint8_t ptr, uint8_t size_from_ptr, uint8_t size_from_ptr_old) = 0;
 
   friend SubEntries;
   friend Entry;
+  friend iterator;
+  friend const_iterator;
 };
 
 
@@ -229,6 +237,7 @@ public:
   // Constructors
   static Packet null() { return Packet(); }
   static Packet empty(uint8_t* buf, uint8_t N, ref_change_t ref_change = nullptr) { 
+    buf[0] = 0;
     return Packet(buf, N, ref_change); 
   }
   static const Packet decode(const uint8_t* buf, ref_change_t ref_change = nullptr) { 

@@ -234,7 +234,6 @@ void assertRandomEntry(wcpp::EntriesConstIterator e, RandomSequence::iterator& r
     case 12: {
       EXPECT_TRUE((*e).isPacket());
       wcpp::Packet sp = (*e).getPacket();
-      printf("pac %X %d %X\n", sp.packet_id(), rand.i_, *rand.next() % 128);
       assertRandomPacket(sp, rand);
       break;
     }
@@ -380,13 +379,16 @@ TEST(PacketTest, BasicAssertions) {
       break;
     }
 
+    p.append("Ix").setInt(1);
+    p.clear();
+
     p.append("Nu").setNull();
     p.append("Ix").setInt(1);
     p.append("Iy").setInt(1234567890);
-    p.append("Iz").setInt(-1234567890);
     p.append("Fx").setFloat16(1.25);
     p.append("Fy").setFloat32(4.56);
     p.append("Fz").setFloat64(7.89);
+    p.append("Fw").setFloat64(9.42);
     p.append("Bx").setBytes((const uint8_t*)"ABC", 3);
     p.append("By").setString("abcdefghijk");
     auto sub = p.append("St").setStruct();
@@ -402,9 +404,13 @@ TEST(PacketTest, BasicAssertions) {
 
     p.append("Sp").setPacket(sp);
 
-    // for (int i = 0; i < p.size(); i++)
-    //   printf("%02X ", buf[i]);
-    // printf("\n");
+    p.at(3).insert("Iz").setInt(-1234567890);
+    p.at(7).remove();
+
+    printf("size: %d\n", p.size());
+    for (int i = 0; i < p.size(); i++)
+      printf("%02X ", buf[i]);
+    printf("\n");
 
     fout.write(reinterpret_cast<const char *>(p.encode()), p.size());
     fout << p.checksum();
