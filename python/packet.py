@@ -246,9 +246,9 @@ class Entry:
     def match_type(self, value, mask=0b111111):
         return (self.type_ & mask) == value
 
-    def print(self, indent: str = ""):
-        payload_str = ""
-        type_str = ""
+    def __str__(self, indent: str = '') -> str:
+        payload_str = ''
+        type_str = ''
         if self.is_null():
             payload_str = "null"
             type_str = "null   "
@@ -272,13 +272,15 @@ class Entry:
         elif self.is_struct():
             type_str = "struct "
 
-        print(indent + self.name + ": " + type_str + " = " + payload_str)
+        s = indent + self.name + ': ' + type_str + ' = ' + payload_str + '\n'
 
         if self.is_packet():
-            self.packet().print(indent + "  ")
+            s += self.packet().__str__(indent + '  ')
         elif self.is_struct():
             for entry in self.struct():
-                entry.print(indent + "  ")
+                s += entry.__str__(indent + '  ')
+
+        return s
 
 
 class PacketType(IntEnum):
@@ -341,19 +343,16 @@ class Packet:
                 return entry
         return None
 
-    def print(self, indent: str = ""):
+    def __str__(self, indent: str = ''):
         if self.is_local():
-            print(
-                f"{indent}{self.type_}[{self.size}] {hex(self.packet_id)} by {hex(self.component_id)}, local"
-            )
+            s = f'{indent}{self.type_}[{self.size}] {hex(self.packet_id)} by {hex(self.component_id)}, local\n'
         else:
-            print(
-                f"{indent}{self.type_}[{self.size}] {hex(self.packet_id)} by {hex(self.component_id)}"
-                + f", remote (from {hex(self.origin_unit_id)} to {hex(self.dest_unit_id)}), #{self.sequence}"
-            )
+            s = (f'{indent}{self.type_}[{self.size}] {hex(self.packet_id)} by {hex(self.component_id)}'
+                + f', remote (from {hex(self.origin_unit_id)} to {hex(self.dest_unit_id)}), #{self.sequence}\n')
 
         for entry in self.entries:
-            entry.print(indent + "  ")
+            s += entry.__str__(indent + '  ')
+        return s
 
     def encode(self) -> bytes:
         buf = bytearray(255)
