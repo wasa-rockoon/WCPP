@@ -19,6 +19,7 @@ from wcpp import Packet, Entry
 
 refresh_per_second = 10
 
+
 def main():
     args = parse_args()
 
@@ -37,7 +38,7 @@ def main():
                 add_packet(all_packets, packet)
             status = 'opened'
     else:
-        ser = open_serial(args.port)
+        ser = open_serial(args.port, args.baud)
         source = ser.name
         status = 'connected'
 
@@ -293,7 +294,7 @@ def parse_packet(data: bytes) -> [Packet]:
 
     packets = []
 
-    while buf and len(buf) > buf[0] + 1:
+    while len(buf) > 0 and len(buf) > buf[0] + 1:
         size = buf[0]
 
         if buf[size + 1] != 0:
@@ -304,9 +305,10 @@ def parse_packet(data: bytes) -> [Packet]:
                 buf = buf[zero + 1:]
             continue
 
+
         packet = Packet.decode(buf[:size])
         checksum = buf[size]
-        if packet.checksum() == checksum:
+        if packet and packet.checksum() == checksum:
             packets.append(packet)
 
         buf = buf[size + 1:]
@@ -333,9 +335,9 @@ def select_first(all_packets):
 
 
                 
-def open_serial(port: str = None) -> serial.Serial:
+def open_serial(port: str = None, baud: int = 115200) -> serial.Serial:
     if port:
-        ser = serial.Serial(port)
+        ser = serial.Serial(port, baudrate=baud)
         if not ser.isOpen():
             raise ConnectionError('Failed to open serial port: ' + source)
         return ser
@@ -345,7 +347,7 @@ def open_serial(port: str = None) -> serial.Serial:
             raise FileNotFoundError('No serial port detected. Specify a port or file name manually.')
         
         source = ports[-1].device
-        ser = serial.Serial(source)
+        ser = serial.Serial(source, baudrate=baud)
         if not ser.isOpen():
             raise ConnectionError('Failed to open serial port: ' + source)
         return ser

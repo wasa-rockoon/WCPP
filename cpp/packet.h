@@ -232,7 +232,7 @@ private:
 
 class Packet: public Entries {
 public:
-  using ref_change_t = void (*)(Packet&, int);
+  using ref_change_t = void (*)(const Packet&, int);
 
   // Constructors
   static Packet null() { return Packet(); }
@@ -241,13 +241,16 @@ public:
     return Packet(buf, N, ref_change); 
   }
   static const Packet decode(const uint8_t* buf, ref_change_t ref_change = nullptr) { 
-    return Packet(const_cast<uint8_t*>(buf), ref_change); 
+    Packet p = Packet(const_cast<uint8_t*>(buf), ref_change); 
+    return p;
   }
 
   inline Packet(const Packet& packet): Packet(packet.buf_, packet.buf_size_, packet.ref_change_) {
-    if (ref_change_ != nullptr) (*ref_change_)(*this, +1);
+    if (!isNull() && ref_change_ != nullptr) (*ref_change_)(*this, +1);
   }
-  inline Packet(Packet&& packet): Packet(packet.buf_, packet.buf_size_, packet.ref_change_) {}
+  inline Packet(Packet&& packet): Packet(packet.buf_, packet.buf_size_, packet.ref_change_) {
+    packet.buf_ = nullptr;
+  }
 
   // Setting header
   Packet &command(uint8_t packet_id, uint8_t component_id = component_id_self);
@@ -292,13 +295,13 @@ public:
   bool copyPayload(const Packet& from);
   bool copy(const Packet& from);
 
-
-  inline ~Packet() { if (ref_change_ != nullptr) ref_change_(*this, -1); }
+  void clear();
+  inline ~Packet() { clear(); }
 
 private:
   ref_change_t ref_change_;
 
-  inline Packet() {}
+  inline Packet(): ref_change_(nullptr) {}
   inline Packet(uint8_t* buf, ref_change_t ref_change = nullptr): Packet(buf, buf[0], ref_change) {}
 
   inline Packet(uint8_t* buf, uint8_t buf_size, ref_change_t ref_change = nullptr)

@@ -408,6 +408,7 @@ Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id,
 };
 
 Packet& Packet::operator=(const Packet& packet) {
+  if (!isNull() && ref_change_ != nullptr) ref_change_(*this, -1);
   buf_ = packet.buf_;
   buf_size_ = packet.buf_size_;
   ref_change_ = packet.ref_change_;
@@ -416,9 +417,12 @@ Packet& Packet::operator=(const Packet& packet) {
 }
 
 Packet& Packet::operator=(Packet&& packet) {
+  if (!isNull() && ref_change_ != nullptr) ref_change_(*this, -1);
   buf_ = packet.buf_;
   buf_size_ = packet.buf_size_;
   ref_change_ = packet.ref_change_;
+  packet.buf_ = nullptr;
+  // if (ref_change_ != nullptr) ref_change_(*this, +1);
   return *this;
 }
 
@@ -438,10 +442,16 @@ bool Packet::copy(const Packet& from) {
   return true;
 }
 
+void Packet::clear() {
+  if (!isNull() && ref_change_ != nullptr) ref_change_(*this, -1);
+  buf_ = nullptr;
+}
+
+
 bool Packet::resize(uint8_t ptr, uint8_t size_from_ptr, uint8_t size_from_ptr_old) {
   // printf("RESIZE P %d %d %d %d\n", ptr, size_from_ptr, size_from_ptr_old, buf_size_);
   if (size() + size_from_ptr - size_from_ptr_old > buf_size_) return false;
-  std::memcpy(buf_ + ptr + size_from_ptr, buf_ + ptr + size_from_ptr_old, size() - ptr - size_from_ptr_old);
+  std::memmove(buf_ + ptr + size_from_ptr, buf_ + ptr + size_from_ptr_old, size() - ptr - size_from_ptr_old);
   buf_[0] += size_from_ptr - size_from_ptr_old;
   return true;
 }
