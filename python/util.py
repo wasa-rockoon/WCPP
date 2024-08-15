@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+import sys
+import code
+import readline
+import os
+import atexit
 from collections import defaultdict
 import argparse
 from datetime import datetime
@@ -7,6 +12,7 @@ import time
 import serial
 import serial.tools.list_ports
 import getchlib
+import code
 from rich.live import Live
 from rich.tree import Tree
 from rich.console import Console
@@ -15,6 +21,7 @@ from rich.text import Text
 from rich.layout import Layout
 from rich.panel import Panel
 from wcpp import Packet, Entry
+import wcpp
 
 
 refresh_per_second = 10
@@ -30,11 +37,27 @@ def main():
     raw_data = bytearray([])
     all_packets = defaultdict(lambda: [defaultdict(lambda: [defaultdict(lambda: [[], None, -1]), None]), None])
 
+    if args.repl:
+        print('Starting REPL. Call send(packet: Packet) to send packet via wcpp-util.')
+            
+        with open('.command', mode='ab') as f:
+
+            def send_command(packet: Packet):
+                f.write(packet.encode())
+                f.write(bytes([packet.checksum(), 0]))
+                f.flush()
+
+            console = Console(
+                local={name: getattr(wcpp, name) for name in dir(wcpp)} | {'send': send_command}
+            )
+            console.interact()
+        return
+
     if args.file:
         source = args.file
         with open(args.file, mode='rb') as f:
             data = f.read()
-            for packet in parse_packet(data):
+            for packet in parse_packet(data)[1]:
                 add_packet(all_packets, packet)
             status = 'opened'
     else:
@@ -42,12 +65,24 @@ def main():
         source = ser.name
         status = 'connected'
 
+    try:
+        with open('.command', mode='xb') as f:
+            pass
+    except:
+        pass
+
+    command_file = open('.command', mode='rb')
+    command_file.seek(0, 2)
+
     layout = init_layout(source, status)
 
     with Live(layout, refresh_per_second=refresh_per_second, transient=True, screen=True) as live:
         last_refreshed = time.time()
 
         selection = [0, 0, 0]
+
+        data = b''
+        command_data = b''
 
         while True:
 
@@ -83,10 +118,23 @@ def main():
             else:
                 layout['input'].update(Text(':'))
 
+            # Read command
+            command_data = command_file.read() or b''
+            command_data, packets = parse_packet(command_data)
+            for packet in packets:
+                add_packet(all_packets, packet, datetime.now())
+
+                if ser and ser.isOpen():
+                    ser.write(packet.encode())
+                    ser.write(bytes([packet.checksum(), 0]))
+                    ser.flush()
+
+                    layout['message'].update(Text('sent packet'))
+
             # Read serial
             if ser and ser.isOpen():
                 try:
-                    data = ser.read_all() or b''
+                    data += ser.read_all() or b''
                     raw_data.extend(data)
                 except:
                     ser.close()
@@ -96,8 +144,11 @@ def main():
                     layout['source'].update(Text(status + ' ' + source)),
                     continue
 
-                for packet in parse_packet(data):
+                data, packets = parse_packet(data)
+                for packet in packets:
                     add_packet(all_packets, packet, datetime.now())
+
+
 
 
 
@@ -109,6 +160,7 @@ def parse_args():
     parser.add_argument('-b', '--baud', help='Serial baudrate', type=int, default=115200)
     parser.add_argument('-o', '--out', help='output file', default='data.bin')
     parser.add_argument('-q', '--quit', help='automatically close when data finished')
+    parser.add_argument('-r', '--repl', action='store_true')
 
     return parser.parse_args()
 
@@ -272,7 +324,7 @@ def on_input(c: str, all_packets, selection, ser) -> str:
                 return f'showing {new_i}th packet'
         else:
             return f'select packet first'
-
+        
     if c == 'C':
         all_packets.clear() 
         return f'cleared all packets'
@@ -286,11 +338,7 @@ def on_input(c: str, all_packets, selection, ser) -> str:
     return None
 
 
-buf = b''
-def parse_packet(data: bytes) -> [Packet]:
-    global buf
-
-    buf += data
+def parse_packet(buf: bytes) -> tuple[bytes, list[Packet]]:
 
     packets = []
 
@@ -313,7 +361,7 @@ def parse_packet(data: bytes) -> [Packet]:
 
         buf = buf[size + 1:]
 
-    return packets
+    return (buf, packets)
 
 def add_packet(all_packets, packet, time=None):
     all_packets[packet.origin_unit_id][1] = time
@@ -352,6 +400,25 @@ def open_serial(port: str = None, baud: int = 115200) -> serial.Serial:
             raise ConnectionError('Failed to open serial port: ' + source)
         return ser
 
+
+class Console(code.InteractiveConsole):
+    def __init__(self, local=None, filename="<console>",
+                 histfile=os.path.expanduser("~/.console-history")):
+        code.InteractiveConsole.__init__(self, local, filename)
+        self.init_history(histfile)
+
+    def init_history(self, histfile):
+        readline.parse_and_bind("tab: complete")
+        if hasattr(readline, "read_history_file"):
+            try:
+                readline.read_history_file(histfile)
+            except IOError:
+                pass
+            atexit.register(self.save_history, histfile)
+
+    def save_history(self, histfile):
+        readline.write_history_file(histfile)
+    
 
 if __name__ == "__main__":
     main()

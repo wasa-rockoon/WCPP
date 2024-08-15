@@ -6,4 +6,6 @@ __pycache__
 build/
 *.out
 
+.command
+
 .DS_Store
