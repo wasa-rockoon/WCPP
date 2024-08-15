@@ -152,6 +152,7 @@ public:
   EntriesIterator &operator++();
   inline bool operator==(const EntriesIterator &i) const { return ptr_ == i.ptr_; }
   inline bool operator!=(const EntriesIterator &i) const { return ptr_ != i.ptr_; }
+  operator bool() const;
 
   EntriesIterator &find(const char name[2]);
   Entry insert(const char name[2]);
@@ -172,6 +173,7 @@ public:
   EntriesConstIterator &operator++();
   bool operator==(const EntriesConstIterator &i) const { return ptr_ == i.ptr_; }
   bool operator!=(const EntriesConstIterator &i) const { return ptr_ != i.ptr_; }
+  operator bool() const;
 
   EntriesConstIterator &find(const char name[2]);
 

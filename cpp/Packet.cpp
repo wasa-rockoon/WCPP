@@ -309,6 +309,12 @@ EntriesConstIterator &EntriesConstIterator::operator++() {
   return *this;
 }
 
+EntriesIterator::operator bool() const { 
+  return ptr_ < entries_.end().ptr_; 
+}
+EntriesConstIterator::operator bool() const { 
+  return ptr_ < entries_.end().ptr_; 
+}
 
 EntriesIterator& EntriesIterator::find(const char name[2]) {
   while (*this != entries_.end() && (**this).name() == name) ++(*this);
@@ -384,25 +390,21 @@ Packet &Packet::command(uint8_t packet_id, uint8_t component_id,
 };
 
 Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id) {
-  unsigned header_size_old = header_size();
   buf_[1] = packet_id | packet_type_mask;
   buf_[2] = component_id;
   buf_[3] = unit_id_local;
-  buf_[0] = header_size();
   resize(0, 4, buf_[0]);
   return *this;
 };
 
 Packet &Packet::telemetry(uint8_t packet_id, uint8_t component_id,
                           uint8_t origin_unit_id, uint8_t dest_unit_id, uint16_t sequence) {
-  unsigned header_size_old = header_size();
   buf_[1] = packet_id | packet_type_mask;
   buf_[2] = component_id;
   buf_[3] = origin_unit_id;
   buf_[4] = dest_unit_id;
   buf_[5] = sequence & 0xFF;
   buf_[6] = sequence >> 8;
-  buf_[0] = header_size();
   resize(0, 7, buf_[0]);
   return *this;
 };
