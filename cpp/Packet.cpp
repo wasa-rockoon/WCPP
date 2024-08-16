@@ -317,12 +317,18 @@ EntriesConstIterator::operator bool() const {
 }
 
 EntriesIterator& EntriesIterator::find(const char name[2]) {
-  while (*this != entries_.end() && (**this).name() == name) ++(*this);
+  while (*this != entries_.end()) {
+    if ((**this).name() == name) return *this;
+    ++(*this);
+  } 
   return *this;
 }
 
 EntriesConstIterator& EntriesConstIterator::find(const char name[2]) {
-  while (*this != entries_.end() && (**this).name() == name) ++(*this);
+  while (*this != entries_.end()) {
+    if ((**this).name() == name) return *this;
+    ++(*this);
+  } 
   return *this;
 }
 
@@ -440,7 +446,7 @@ bool Packet::copyPayload(const Packet& from) {
 bool Packet::copy(const Packet& from) {
   if (buf_size_ < from.size()) return false;
 
-  std::memcpy(buf_, from.buf_, from.size() + 1);
+  std::memcpy(buf_, from.buf_, from.size());
   return true;
 }
 

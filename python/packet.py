@@ -414,7 +414,7 @@ class Packet:
 
     @classmethod
     def decode(cls, buf: bytes) -> Optional["Packet"]:
-        if buf[0] > len(buf):
+        if not buf or buf[0] > len(buf):
             return None
 
         try:
