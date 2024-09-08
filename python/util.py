@@ -2,7 +2,12 @@
 
 import sys
 import code
-import readline
+
+#import readline
+
+from pyreadline3 import Readline
+readline = Readline()
+
 import os
 import atexit
 from collections import defaultdict
@@ -20,9 +25,12 @@ from rich.columns import Columns
 from rich.text import Text
 from rich.layout import Layout
 from rich.panel import Panel
-from wcpp import Packet, Entry
-import wcpp
 
+#from wcpp import Packet, Entry
+#import wcpp
+
+from packet import Packet, Entry
+import packet
 
 refresh_per_second = 10
 
@@ -48,7 +56,8 @@ def main():
                 f.flush()
 
             console = Console(
-                local={name: getattr(wcpp, name) for name in dir(wcpp)} | {'send': send_command}
+                #local={name: getattr(wcpp, name) for name in dir(wcpp)} | {'send': send_command}
+                local={name: getattr(packet, name) for name in dir(packet)} | {'send': send_command}
             )
             console.interact()
         return
