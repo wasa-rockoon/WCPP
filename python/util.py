@@ -303,7 +303,7 @@ def packet_view(all_packets, selection) -> Panel:
             txt += f'entries:      {len(packet.entries)}\n'
 
             for entry in packet.entries:
-                txt += entry.__str__('  ')
+                txt += format_entry_for_view(entry, '  ')
 
             if packet.is_local():
                 title = f'component {hex(packet.component_id)}, packet {hex(packet.packet_id)} ({chr(packet.packet_id)})'
@@ -313,6 +313,49 @@ def packet_view(all_packets, selection) -> Panel:
             return Panel(Text(txt), title=title)
 
     return None
+
+
+def format_entry_for_view(entry: Entry, indent: str = '') -> str:
+    payload_str = ''
+    type_str = ''
+    if entry.is_null():
+        payload_str = "null"
+        type_str = "null   "
+    elif entry.is_int():
+        payload_str = str(entry.int())
+        type_str = "int    "
+    elif entry.is_float16():
+        type_str = "float16"
+        payload_str = str(entry.float())
+    elif entry.is_float32():
+        type_str = "float32"
+        payload_str = str(entry.float())
+    elif entry.is_float64():
+        type_str = "float64"
+        payload_str = str(entry.float())
+    elif entry.is_float():
+        type_str = "float  "
+        payload_str = str(entry.float())
+    elif entry.is_bytes():
+        type_str = "bytes  "
+        payload_str = repr(entry.string())
+    elif entry.is_packet():
+        type_str = "packet "
+    elif entry.is_struct():
+        type_str = "struct "
+    else:
+        type_str = "unknown"
+
+    s = indent + entry.name + ': ' + type_str + ' = ' + payload_str + '\n'
+
+    if entry.is_packet() and entry.packet():
+        for sub_entry in entry.packet().entries:
+            s += format_entry_for_view(sub_entry, indent + '  ')
+    elif entry.is_struct():
+        for sub_entry in entry.struct():
+            s += format_entry_for_view(sub_entry, indent + '  ')
+
+    return s
 
 def get_entry_value(entry: Entry, flatten=False, prefix='') -> dict:
     """
