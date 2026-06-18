@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+//パケットをPCから送信できるようにする
 __version__ = "1.2.0"  # 2025-06-25 - CSV export improvements, UT timestamp and component grouping format
 
 import sys
