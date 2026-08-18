@@ -1,5 +1,6 @@
 import pytest
 from .packet import Packet, Entry
+from .transport import enqueue_packet, frame_packet
 
 class TestPacket:
     def test_cpp_output(self):
@@ -105,3 +106,26 @@ class TestPacket:
         f = open('cpp/build/sample.bin', 'rb')
         data = f.read()
         assert sample_buf == data
+
+    def test_frame_packet(self):
+        packet = Packet.command(ord('A'), 0x11)
+        packet.entries = [
+            Entry('Cd').set_string('test'),
+        ]
+
+        frame = frame_packet(packet)
+
+        assert frame[:-2] == packet.encode()
+        assert frame[-2] == packet.checksum()
+        assert frame[-1] == 0
+
+    def test_enqueue_packet(self, tmp_path):
+        packet = Packet.command(ord('B'), 0x11)
+        packet.entries = [
+            Entry('Ms').set_string('queued'),
+        ]
+
+        command_path = tmp_path / '.command'
+        enqueue_packet(packet, command_path)
+
+        assert command_path.read_bytes() == frame_packet(packet)

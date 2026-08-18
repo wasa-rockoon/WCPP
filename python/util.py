@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-//パケットをPCから送信できるようにする
+# パケットをPCから送信できるようにする
 __version__ = "1.2.0"  # 2025-06-25 - CSV export improvements, UT timestamp and component grouping format
 
 import sys
@@ -28,7 +28,7 @@ from rich.columns import Columns
 from rich.text import Text
 from rich.layout import Layout
 from rich.panel import Panel
-from wcpp import Packet, Entry
+from wcpp import Packet, Entry, frame_packet
 import wcpp
 
 #キーボード入力のためのモジュールを条件分岐でインポート
@@ -69,8 +69,7 @@ def main():
         with open('.command', mode='ab') as f:
 
             def send_command(packet: Packet):
-                f.write(packet.encode())
-                f.write(bytes([packet.checksum(), 0]))
+                f.write(frame_packet(packet))
                 f.flush()
 
             console = Console(
@@ -162,8 +161,7 @@ def main():
                           flatten_structs=not args.no_flatten, csv_path=args.csv_path)
 
                 if ser and ser.isOpen():
-                    ser.write(packet.encode())
-                    ser.write(bytes([packet.checksum(), 0]))
+                    ser.write(frame_packet(packet))
                     ser.flush()
 
                     layout['message'].update(Text('sent packet'))
