@@ -171,3 +171,33 @@ pip install -r requiements.txt
 pytest -s
 ```
 
+## wcpp-util Raw Autosave
+
+シリアル受信モードでは、受信したRawバイトを操作なしで常時保存する。
+
+```powershell
+wcpp-util --port COM5 --baud 115200
+```
+
+標準では、起動したディレクトリの`logs/`以下にセッションディレクトリを作成する。
+実行中のRawログは`raw.bin.tmp`で、`q`または`Ctrl+C`による正常終了後に
+`raw.bin`へ変更される。異常終了時の`raw.bin.tmp`も`--file`で解析できる。
+
+```powershell
+wcpp-util --file logs\<session>\raw.bin.tmp
+```
+
+保存先ルートと同期間隔は変更できる。
+
+```powershell
+wcpp-util --port COM5 --log-dir C:\wcpp-logs --flush-interval 1 --fsync-interval 5
+```
+
+特定のRawファイル名を指定する場合は`--out`を使用する。既存ファイルは上書きしない。
+
+```powershell
+wcpp-util --port COM5 --out C:\wcpp-logs\test.bin
+```
+
+受信中に`s`を押すと、現在のRawログを即座にflush/fsyncする。
+

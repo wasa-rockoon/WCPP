@@ -7,5 +7,6 @@ build/
 *.out
 
 .command
+/logs/
 
 .DS_Store

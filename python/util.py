@@ -2,7 +2,10 @@
 
 import sys
 import code
-import readline
+try:
+    import readline
+except ImportError:
+    readline = None
 import os
 import atexit
 from collections import defaultdict
@@ -11,7 +14,6 @@ from datetime import datetime
 import time
 import serial
 import serial.tools.list_ports
-import getchlib
 import code
 from rich.live import Live
 from rich.tree import Tree
@@ -22,6 +24,30 @@ from rich.layout import Layout
 from rich.panel import Panel
 from wcpp import Packet, Entry
 import wcpp
+try:
+    from .session_logger import SessionManager
+except ImportError:
+    from session_logger import SessionManager
+
+if sys.platform == 'win32':
+    import msvcrt
+
+    def getkey():
+        if not msvcrt.kbhit():
+            return ''
+        key = msvcrt.getwch()
+        # Consume the scan code paired with Windows special keys. The current
+        # TUI only uses printable one-character commands.
+        if key in ('\x00', '\xe0'):
+            if msvcrt.kbhit():
+                msvcrt.getwch()
+            return ''
+        return key
+else:
+    import getchlib
+
+    def getkey():
+        return getchlib.getkey(False, echo=False)
 
 
 refresh_per_second = 10
@@ -33,132 +59,153 @@ def main():
     source = 'unknown'
     status = 'not opened'
     ser = None
-
-    raw_data = bytearray([])
+    session = None
+    command_file = None
+    exit_reason = 'ERROR'
     all_packets = defaultdict(lambda: [defaultdict(lambda: [defaultdict(lambda: [[], None, -1]), None]), None])
 
-    if args.repl:
-        print('Starting REPL. Call send(packet: Packet) to send packet via wcpp-util.')
-            
-        with open('.command', mode='ab') as f:
-
-            def send_command(packet: Packet):
-                f.write(packet.encode())
-                f.write(bytes([packet.checksum(), 0]))
-                f.flush()
-
-            console = Console(
-                local={name: getattr(wcpp, name) for name in dir(wcpp)} | {'send': send_command}
-            )
-            console.interact()
-        return
-
-    if args.file:
-        source = args.file
-        with open(args.file, mode='rb') as f:
-            data = f.read()
-            for packet in parse_packet(data)[1]:
-                add_packet(all_packets, packet)
-            status = 'opened'
-    else:
-        ser = open_serial(args.port, args.baud)
-        source = ser.name
-        status = 'connected'
-
     try:
-        with open('.command', mode='xb') as f:
+        if args.repl:
+            print('Starting REPL. Call send(packet: Packet) to send packet via wcpp-util.')
+
+            with open('.command', mode='ab') as f:
+
+                def send_command(packet: Packet):
+                    f.write(packet.encode())
+                    f.write(bytes([packet.checksum(), 0]))
+                    f.flush()
+
+                console = Console(
+                    local={name: getattr(wcpp, name) for name in dir(wcpp)} | {'send': send_command}
+                )
+                console.interact()
+            exit_reason = 'COMPLETED'
+            return
+
+        if args.file:
+            source = args.file
+            with open(args.file, mode='rb') as f:
+                file_data = f.read()
+                for packet in parse_packet(file_data)[1]:
+                    add_packet(all_packets, packet)
+                status = 'opened'
+        else:
+            ser = open_serial(args.port, args.baud)
+            source = ser.name
+            status = 'connected'
+            session = SessionManager(
+                log_dir=args.log_dir,
+                source=source,
+                baudrate=args.baud,
+                output_path=args.out,
+                flush_interval=args.flush_interval,
+                fsync_interval=args.fsync_interval,
+            )
+            session.start()
+
+        try:
+            with open('.command', mode='xb') as f:
+                pass
+        except FileExistsError:
             pass
-    except:
-        pass
 
-    command_file = open('.command', mode='rb')
-    command_file.seek(0, 2)
+        command_file = open('.command', mode='rb')
+        command_file.seek(0, 2)
 
-    layout = init_layout(source, status)
+        layout = init_layout(source, status)
 
-    with Live(layout, refresh_per_second=refresh_per_second, transient=True, screen=True) as live:
-        last_refreshed = time.time()
+        with Live(layout, refresh_per_second=refresh_per_second, transient=True, screen=True):
+            last_refreshed = time.time()
+            selection = [0, 0, 0]
+            parse_buffer = b''
+            command_data = b''
 
-        selection = [0, 0, 0]
+            while True:
+                now = time.time()
+                if now > last_refreshed + 1.0/refresh_per_second:
+                    last_refreshed = now
+                    layout['source'].update(Text(source_status(status, source, session)))
 
-        data = b''
-        command_data = b''
+                    if selection == [0, 0, 0]:
+                        selection = select_first(all_packets) or selection
 
-        while True:
+                    layout['main']['list'].update(packet_tree(all_packets, selection))
+                    panel = packet_view(all_packets, selection)
+                    if panel:
+                        layout['main']['packet'].update(panel)
 
-            # Refreh UI
-            now = time.time()
-            if now > last_refreshed + 1.0/refresh_per_second:
-                last_refreshed = now
+                c: str = getkey()
+                message = on_input(c, all_packets, selection, ser)
+                if c == 's':
+                    if session and session.force_flush():
+                        message = f'raw log flushed ({session.bytes_written} bytes)'
+                    elif session:
+                        message = f'raw log flush failed: {session.last_error}'
+                    else:
+                        message = 'raw autosave is only active for serial input'
+                if message:
+                    layout['message'].update(Text(message))
+                if message == 'quit':
+                    exit_reason = 'COMPLETED'
+                    time.sleep(0.5)
+                    break
 
-                if selection == [0, 0, 0]:
-                    selection = select_first(all_packets) or selection
+                layout['input'].update(Text(':' + c if c else ':'))
 
-                layout['main']['list'].update(packet_tree(all_packets, selection))
-
-                panel = packet_view(all_packets, selection)
-                if panel:
-                    layout['main']['packet'].update(panel)
-
-            # Input
-            c: str = getchlib.getkey(False, echo=False)
-            message = on_input(c, all_packets, selection, ser)
-            if c == 's':
-                with open(args.out, mode='wb') as f:
-                    f.write(raw_data)
-            if message:
-                layout['message'].update(Text(message))
-            if message == 'quit':
-                time.sleep(0.5)
-                break                
-
-            if c:
-                layout['input'].update(Text(':' + c))
-                # live.refresh()
-            else:
-                layout['input'].update(Text(':'))
-
-            # Read command
-            command_data = command_file.read() or b''
-            command_data, packets = parse_packet(command_data)
-            for packet in packets:
-                add_packet(all_packets, packet, datetime.now())
-
-                if ser and ser.isOpen():
-                    ser.write(packet.encode())
-                    ser.write(bytes([packet.checksum(), 0]))
-                    ser.flush()
-
-                    layout['message'].update(Text('sent packet'))
-
-            # Read serial
-            if ser and ser.isOpen():
-                try:
-                    data += ser.read_all() or b''
-                    raw_data.extend(data)
-                except:
-                    ser.close()
-
-                if not ser.isOpen():
-                    status = 'disconnected'
-                    layout['source'].update(Text(status + ' ' + source)),
-                    continue
-
-                data, packets = parse_packet(data)
+                command_data += command_file.read() or b''
+                command_data, packets = parse_packet(command_data)
                 for packet in packets:
                     add_packet(all_packets, packet, datetime.now())
 
+                    if ser and ser.is_open:
+                        ser.write(packet.encode())
+                        ser.write(bytes([packet.checksum(), 0]))
+                        ser.flush()
+                        layout['message'].update(Text('sent packet'))
 
+                if ser and ser.is_open:
+                    try:
+                        new_data = ser.read_all() or b''
+                        if new_data:
+                            if session:
+                                session.write(new_data)
+                            parse_buffer += new_data
+                    except (serial.SerialException, OSError):
+                        ser.close()
 
+                    if not ser.is_open:
+                        status = 'disconnected'
+                    else:
+                        parse_buffer, packets = parse_packet(parse_buffer)
+                        for packet in packets:
+                            add_packet(all_packets, packet, datetime.now())
 
+                if session:
+                    session.tick()
 
+    except KeyboardInterrupt:
+        if session:
+            session.log_event('KEYBOARD_INTERRUPT')
+        exit_reason = 'COMPLETED'
+    finally:
+        if command_file:
+            command_file.close()
+        if ser and ser.is_open:
+            ser.close()
+        if session:
+            session.finalize(exit_reason)
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--port', help='Serial port path')
     parser.add_argument('-f', '--file', help='File path')
     parser.add_argument('-b', '--baud', help='Serial baudrate', type=int, default=115200)
-    parser.add_argument('-o', '--out', help='output file', default='data.bin')
+    parser.add_argument('-o', '--out', help='Explicit raw autosave path (must not already exist)')
+    parser.add_argument('--log-dir', default='logs', help='Autosave session directory root (default: ./logs)')
+    parser.add_argument('--flush-interval', type=float, default=1.0,
+                        help='Seconds between buffered file flushes (default: 1)')
+    parser.add_argument('--fsync-interval', type=float, default=5.0,
+                        help='Seconds between durable disk syncs (default: 5)')
     parser.add_argument('-q', '--quit', help='automatically close when data finished')
     parser.add_argument('-r', '--repl', action='store_true')
 
@@ -172,7 +219,7 @@ k: previous packet
 j: next packet
 K: first packet
 J: latest packet
-s: save raw data
+s: flush raw autosave to disk
 e: export selected as CSV
 E: export all as CSV
 C: clear all packets
@@ -182,7 +229,7 @@ q: quit
 def init_layout(source: str, status: str) -> Layout:
     layout = Layout()
     layout.split_column(
-        Layout(Text(status + ' ' + source), name='source', size=1),
+        Layout(Text(status + ' ' + source), name='source', size=2),
         Layout(name='main'),
         Layout(Text(' '), name='message', size=1),
         Layout(Text(':'), name='input', size=1),
@@ -193,6 +240,16 @@ def init_layout(source: str, status: str) -> Layout:
         Layout(Panel(Text(help_text(), justify="left"), title='Help'), size=30),
     )
     return layout
+
+def source_status(status: str, source: str, session) -> str:
+    if not session:
+        return f'{status} {source}'
+    text = f'{status} {source} | {session.status_label} | {session.bytes_written} bytes'
+    if session.last_error:
+        text += f' | {session.last_error}'
+    else:
+        text += f' | {session.temporary_raw_path}'
+    return text
 
 def packet_tree(all_packets, selection) -> Panel:
     tree = [Tree('unit')]
@@ -270,8 +327,6 @@ def packet_view(all_packets, selection) -> Panel:
 
 def on_input(c: str, all_packets, selection, ser) -> str:
     if c == 'q':
-        if ser:
-            ser.close()
         return 'quit'
 
     if c == 'h' or c == 'l':
@@ -330,7 +385,7 @@ def on_input(c: str, all_packets, selection, ser) -> str:
         return f'cleared all packets'
 
     if c == 's':
-        return f'saved raw data as data.bin'
+        return None
 
     if c:
         return f'unknown command: {c}'
@@ -408,8 +463,9 @@ class Console(code.InteractiveConsole):
         self.init_history(histfile)
 
     def init_history(self, histfile):
-        readline.parse_and_bind("tab: complete")
-        if hasattr(readline, "read_history_file"):
+        if readline is not None:
+            readline.parse_and_bind("tab: complete")
+        if readline is not None and hasattr(readline, "read_history_file"):
             try:
                 readline.read_history_file(histfile)
             except IOError:
@@ -417,7 +473,8 @@ class Console(code.InteractiveConsole):
             atexit.register(self.save_history, histfile)
 
     def save_history(self, histfile):
-        readline.write_history_file(histfile)
+        if readline is not None:
+            readline.write_history_file(histfile)
     
 
 if __name__ == "__main__":
