@@ -16,39 +16,26 @@ from typing import List, Optional
 
 # モジュールインポートの柔軟な対応
 import_errs = []
+package_root = Path(__file__).resolve().parents[2]
+for path_entry in [str(package_root), str(Path(__file__).resolve().parent)]:
+    if path_entry not in sys.path:
+        sys.path.insert(0, path_entry)
+
 try:
     from wcpp import Entry, Packet, enqueue_packet
 except ImportError as e:
     import_errs.append(f"wcpp: {e}")
-    file_dir = Path(__file__).resolve().parent
-    parent_dir = file_dir.parent
-    wobc_root = file_dir.parents[3] if len(file_dir.parents) >= 4 else file_dir.parent
-
-    for path_entry in [str(parent_dir), str(wobc_root), str(file_dir)]:
-        if path_entry not in sys.path:
-            sys.path.insert(0, path_entry)
-
     try:
-        from python.packet import Entry, Packet
-        from python.transport import enqueue_packet
-    except (ImportError, ValueError) as e2:
-        import_errs.append(f"python...: {e2}")
-        try:
-            from src.library.wcpp.python.packet import Entry, Packet
-            from src.library.wcpp.python.transport import enqueue_packet
-        except (ImportError, ValueError) as e3:
-            import_errs.append(f"src.library...: {e3}")
-            try:
-                from packet import Entry, Packet
-                from transport import enqueue_packet
-            except (ImportError, ValueError) as e4:
-                import_errs.append(f"direct import: {e4}")
-                print("エラー: モジュールの読み込みに失敗しました。")
-                print("詳細:")
-                for err in import_errs:
-                    print(f"  - {err}")
-                print("\n※ Python環境依存ライブラリ (crc 等) がインストールされた仮想環境 (.venv) で実行されているかご確認ください。")
-                sys.exit(1)
+        from packet import Entry, Packet
+        from transport import enqueue_packet
+    except ImportError as e2:
+        import_errs.append(f"direct import: {e2}")
+        print("エラー: ローカルの WCPP モジュールを読み込めませんでした。")
+        print("詳細:")
+        for err in import_errs:
+            print(f"  - {err}")
+        print("\n※ .venv で `pip install -e src/library/wcpp` を実行してパッケージ化してから再実行してください。")
+        sys.exit(1)
 
 
 

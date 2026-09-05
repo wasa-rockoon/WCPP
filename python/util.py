@@ -4,6 +4,7 @@ __version__ = "1.2.0"  # 2025-06-25 - CSV export improvements, UT timestamp and 
 
 import sys
 import code
+from pathlib import Path
 try:
     import readline
 except ImportError:
@@ -17,7 +18,6 @@ from datetime import datetime, timedelta
 import time
 import serial
 import serial.tools.list_ports
-import getchlib
 import code
 import csv
 import os
@@ -28,7 +28,19 @@ from rich.columns import Columns
 from rich.text import Text
 from rich.layout import Layout
 from rich.panel import Panel
-from wcpp import Packet, Entry, frame_packet
+
+# Import the local WCPP package when running directly from the repo without `pip install -e`.
+package_root = Path(__file__).resolve().parents[2]
+for path_entry in [str(package_root), str(Path(__file__).resolve().parent)]:
+    if path_entry not in sys.path:
+        sys.path.insert(0, path_entry)
+
+try:
+    from wcpp import Packet, Entry, frame_packet
+except ImportError:
+    from packet import Packet, Entry
+    from transport import frame_packet
+
 import wcpp
 
 #キーボード入力のためのモジュールを条件分岐でインポート
@@ -43,8 +55,13 @@ if sys.platform == 'win32':
         except (UnicodeDecodeError, OSError, KeyboardInterrupt):
             return ''
 else:
-    import getchlib
+    try:
+        import getchlib
+    except ImportError:
+        getchlib = None
     def getkey():
+        if getchlib is None:
+            return ''
         try:
             return getchlib.getkey(False, echo=False)
         except (OSError, KeyboardInterrupt):
@@ -91,9 +108,14 @@ def main():
                 add_packet(all_packets, packet, time=packet_time, update_csv=args.csv, flatten_structs=not args.no_flatten, csv_path=args.csv_path)
             status = 'opened'
     else:
-        ser = open_serial(args.port, args.baud)
-        source = ser.name
-        status = 'connected'
+        try:
+            ser = open_serial(args.port, args.baud)
+            source = ser.name
+            status = 'connected'
+        except Exception as e:
+            ser = None
+            source = args.port or 'auto serial'
+            status = 'disconnected'
 
     try:
         with open('.command', mode='xb') as f:
@@ -108,6 +130,7 @@ def main():
 
     with Live(layout, refresh_per_second=refresh_per_second, transient=True, screen=True) as live:
         last_refreshed = time.time()
+        last_reconnect_attempt = 0.0
 
         selection = [0, 0, 0]
 
@@ -115,27 +138,73 @@ def main():
         command_data = b''
 
         while True:
-
-            # Refreh UI
+            # Short sleep to release CPU and improve keyboard responsiveness
+            time.sleep(0.005)
             now = time.time()
-            if now > last_refreshed + 1.0/refresh_per_second:
-                last_refreshed = now
 
-                if selection == [0, 0, 0]:
-                    selection = select_first(all_packets) or selection
+            # Read command
+            command_data = command_file.read() or b''
+            command_data, packets = parse_packet(command_data)
+            for packet in packets:
+                add_packet(all_packets, packet, datetime.now(), update_csv=args.csv, 
+                          flatten_structs=not args.no_flatten, csv_path=args.csv_path)
 
-                layout['main']['list'].update(packet_tree(all_packets, selection))
+                if ser and ser.isOpen():
+                    try:
+                        ser.write(frame_packet(packet))
+                        ser.flush()
+                        layout['message'].update(Text('sent packet'))
+                    except Exception as e:
+                        try:
+                            ser.close()
+                        except Exception:
+                            pass
+                        status = 'disconnected'
+                        layout['source'].update(Text(f'{status} {source}'))
+                        layout['message'].update(Text(f'TX error: {str(e)}'))
 
-                panel = packet_view(all_packets, selection)
-                if panel:
-                    layout['main']['packet'].update(panel)
+            # Read serial & auto-reconnect
+            if ser and ser.isOpen():
+                try:
+                    data += ser.read_all() or b''
+                    raw_data.extend(data)
+                except Exception as e:
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
+                    status = 'disconnected'
+                    layout['source'].update(Text(f'{status} {source}'))
+                    layout['message'].update(Text(f'Serial error: {str(e)}'))
+
+                if ser.isOpen():
+                    data, packets = parse_packet(data)
+                    for packet in packets:
+                        add_packet(all_packets, packet, datetime.now(), update_csv=args.csv, 
+                                  flatten_structs=not args.no_flatten, csv_path=args.csv_path)
+            elif not args.file:
+                # Serial Auto Reconnect
+                if now - last_reconnect_attempt >= args.reconnect_interval:
+                    last_reconnect_attempt = now
+                    status = 'reconnecting'
+                    layout['source'].update(Text(f'{status} {source} (interval {args.reconnect_interval}s)'))
+                    try:
+                        new_ser = open_serial(args.port, args.baud)
+                        if new_ser and new_ser.isOpen():
+                            ser = new_ser
+                            source = ser.name
+                            status = 'reconnected'
+                            layout['source'].update(Text(f'{status} {source}'))
+                            layout['message'].update(Text(f'Reconnected to {source}'))
+                    except Exception:
+                        status = 'disconnected'
+                        layout['source'].update(Text(f'{status} {source}'))
 
             # Input
             try:
                 c: str = getkey()
                 message = on_input(c, all_packets, selection, ser, args)
             except Exception as e:
-                # キー入力処理でエラーが発生した場合の安全な処理
                 c = ''
                 message = f'Input error: {str(e)}'
             if c == 's':
@@ -149,44 +218,53 @@ def main():
 
             if c:
                 layout['input'].update(Text(':' + c))
-                # live.refresh()
-            else:
-                layout['input'].update(Text(':'))
 
-            # Read command
-            command_data = command_file.read() or b''
-            command_data, packets = parse_packet(command_data)
-            for packet in packets:
-                add_packet(all_packets, packet, datetime.now(), update_csv=args.csv, 
-                          flatten_structs=not args.no_flatten, csv_path=args.csv_path)
+            # Refresh UI (either on periodic timer OR immediately when a key is pressed)
+            if c or (now > last_refreshed + 1.0/refresh_per_second):
+                last_refreshed = now
 
-                if ser and ser.isOpen():
-                    ser.write(frame_packet(packet))
-                    ser.flush()
+                if selection == [0, 0, 0]:
+                    selection = select_first(all_packets) or selection
 
-                    layout['message'].update(Text('sent packet'))
+                tree_panel, lost_comps = packet_tree(
+                    all_packets, selection,
+                    stale_timeout=args.stale_timeout,
+                    lost_timeout=args.lost_timeout
+                )
+                layout['main']['list'].update(tree_panel)
 
-            # Read serial
-            if ser and ser.isOpen():
-                try:
-                    data += ser.read_all() or b''
-                    raw_data.extend(data)
-                except:
-                    ser.close()
+                if lost_comps and not message and not c:
+                    lost_str = ', '.join(lost_comps)
+                    layout['message'].update(Text(f'WARNING: Telemetry LOST for {lost_str}', style='bold red'))
 
-                if not ser.isOpen():
-                    status = 'disconnected'
-                    layout['source'].update(Text(status + ' ' + source)),
-                    continue
-
-                data, packets = parse_packet(data)
-                for packet in packets:
-                    add_packet(all_packets, packet, datetime.now(), update_csv=args.csv, 
-                              flatten_structs=not args.no_flatten, csv_path=args.csv_path)
+                panel = packet_view(all_packets, selection)
+                if panel:
+                    layout['main']['packet'].update(panel)
 
 
 
 
+
+
+def get_disruption_status(last_time: datetime | None, now_dt: datetime, stale_timeout: float = 2.0, lost_timeout: float = 5.0) -> tuple[str, str, float]:
+    """
+    最終受信時刻と現在時刻から通信状態（OK/STALE/LOST）を判定する。
+    
+    Returns:
+        tuple[str, str, float]: (表示用ラベル, スタイル名, 経過秒数)
+    """
+    if not last_time:
+        return 'NO DATA', 'dim', 0.0
+    elapsed = (now_dt - last_time).total_seconds()
+    if elapsed < 0:
+        elapsed = 0.0
+    if elapsed < stale_timeout:
+        time_fmt = last_time.time().strftime('%X')
+        return f'{time_fmt} ({elapsed:.1f}s)', 'default', elapsed
+    elif elapsed < lost_timeout:
+        return f'STALE ({elapsed:.1f}s)', 'yellow bold', elapsed
+    else:
+        return f'LOST ({elapsed:.1f}s)', 'red bold', elapsed
 
 
 def parse_args():
@@ -200,6 +278,9 @@ def parse_args():
     parser.add_argument('-c', '--csv', action='store_true', help='Auto-update CSV file with packet data')
     parser.add_argument('-n', '--no-flatten', action='store_true', help='Do not flatten structured entries in CSV')
     parser.add_argument('--csv-path', help='Specify custom path for CSV output files')
+    parser.add_argument('--reconnect-interval', type=float, default=2.0, help='Serial reconnect retry interval in seconds')
+    parser.add_argument('--stale-timeout', type=float, default=2.0, help='Time in seconds before telemetry status becomes STALE')
+    parser.add_argument('--lost-timeout', type=float, default=5.0, help='Time in seconds before telemetry status becomes LOST')
 
     return parser.parse_args()
 
@@ -217,10 +298,13 @@ E: export all packets as CSV
 C: clear all packets and CSV data
 q: quit
 
-Command Line Options:
---csv-path PATH: Specify custom CSV output path
---no-flatten: Do not flatten structures in CSV
--c, --csv: Auto-update CSV while receiving
+Options:
+--csv-path PATH: Custom CSV path
+--no-flatten: Do not flatten struct
+-c, --csv: Auto-update CSV
+--reconnect-interval SEC (def: 2.0)
+--stale-timeout SEC (def: 2.0)
+--lost-timeout SEC (def: 5.0)
     '''
 
 def init_layout(source: str, status: str) -> Layout:
@@ -232,47 +316,49 @@ def init_layout(source: str, status: str) -> Layout:
         Layout(Text(':'), name='input', size=1),
     )
     layout['main'].split_row(
-        Layout(Panel(Text(''), title='Packet'), name='list', size=30),
+        Layout(Panel(Text(''), title='Packet'), name='list', size=34),
         Layout(Panel(Text('')), name='packet'),
-        Layout(Panel(Text(help_text(), justify="left"), title='Help'), size=30),
+        Layout(Panel(Text(help_text(), justify="left"), title='Help'), size=34),
     )
     return layout
 
-def packet_tree(all_packets, selection) -> Panel:
+def packet_tree(all_packets, selection, stale_timeout: float = 2.0, lost_timeout: float = 5.0) -> tuple[Panel, list[str]]:
     tree = [Tree('unit')]
     tree[0].add('component').add('packet')
 
-    now = time.time()
+    now_ts = time.time()
+    now_dt = datetime.now()
     times = []
+    lost_components = []
 
     for unit_id, (unit_packets, unit_time) in all_packets.items():
-        style = 'default'
-        if selection[0] == unit_id:
-            style = 'cyan'
+        u_label, u_status_style, _ = get_disruption_status(unit_time, now_dt, stale_timeout, lost_timeout)
+        style = 'cyan' if selection[0] == unit_id else u_status_style
         unit_tree = Tree(f'{hex(unit_id)}', style=style)
         tree.append(unit_tree)
-        times.append(unit_time.time().strftime('%X') if unit_time else '')
+        times.append(u_label)
 
         for component_id, (component_packets, component_time) in unit_packets.items():
-            style = 'default'
-            if selection[0] == unit_id and selection[1] == component_id:
-                style = 'cyan'
+            c_label, c_status_style, _ = get_disruption_status(component_time, now_dt, stale_timeout, lost_timeout)
+            style = 'cyan' if (selection[0] == unit_id and selection[1] == component_id) else c_status_style
+            if 'LOST' in c_label:
+                lost_components.append(f'Unit {hex(unit_id)} Comp {hex(component_id)}')
             component_tree = unit_tree.add(f'{hex(component_id)}', style=style)
-            times.append(component_time.time().strftime('%X') if component_time else '')
+            times.append(c_label)
 
             for packet_id, (packets, packet_time, i) in component_packets.items():
-                style = 'default'
-                if selection[0] == unit_id and selection[1] == component_id and selection[2] == packet_id:
-                    style = 'cyan'
-                if packet_time and now < packet_time.timestamp() + 1.0/refresh_per_second:
+                p_label, p_status_style, _ = get_disruption_status(packet_time, now_dt, stale_timeout, lost_timeout)
+                style = 'cyan' if (selection[0] == unit_id and selection[1] == component_id and selection[2] == packet_id) else p_status_style
+                if packet_time and now_ts < packet_time.timestamp() + 1.0 / refresh_per_second:
                     style += ' reverse'
-                component_tree.add(f'{hex(packet_id)} ({chr(packet_id)})', highlight=True, style=style)
-                            
-                times.append(packet_time.time().strftime('%X') if packet_time else '')
+                
+                pkt_char = chr(packet_id) if 32 <= packet_id <= 126 else '?'
+                component_tree.add(f'{hex(packet_id)} ({pkt_char})', highlight=True, style=style)
+                times.append(p_label)
 
     tree_layout = Layout()
-    tree_layout.split_row(Layout(Columns(tree)), Layout(Text('\n\n\n' + '\n'.join(times), style='blue'), size=8))
-    return Panel(tree_layout, title='Packets')
+    tree_layout.split_row(Layout(Columns(tree)), Layout(Text('\n\n\n' + '\n'.join(times), style='blue'), size=16))
+    return Panel(tree_layout, title='Packets'), lost_components
 
 
 def packet_view(all_packets, selection) -> Panel:
