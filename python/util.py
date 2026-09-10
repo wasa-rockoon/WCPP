@@ -386,8 +386,19 @@ def packet_view(all_packets, selection) -> Panel:
                         
             txt += f'entries:      {len(packet.entries)}\n'
 
+<<<<<<< Updated upstream
             for entry in packet.entries:
                 txt += format_entry_for_view(entry, '  ')
+=======
+            try:
+                entry_text = ''.join(entry.__str__('  ') for entry in packet.entries)
+            except Exception as exc:
+                # Keep navigation available even when one packet cannot be rendered.
+                txt += f'Payload hidden: {type(exc).__name__}: {exc}\n'
+                txt += 'Use j/k for next/previous packet, h/l for another packet ID.\n'
+            else:
+                txt += entry_text
+>>>>>>> Stashed changes
 
             if packet.is_local():
                 title = f'component {hex(packet.component_id)}, packet {hex(packet.packet_id)} ({chr(packet.packet_id)})'
@@ -1275,6 +1286,7 @@ class Console(code.InteractiveConsole):
 
 if __name__ == "__main__":
     main()
+<<<<<<< Updated upstream
 
 def write_safely_to_csv(filepath, write_function, max_retries=3):
     """
@@ -1312,3 +1324,5 @@ def write_safely_to_csv(filepath, write_function, max_retries=3):
     # すべてのリトライが失敗
     error_msg = f"Unable to write to CSV file after {max_retries} attempts. File may be open in another program."
     return False, filepath, error_msg
+=======
+>>>>>>> Stashed changes
